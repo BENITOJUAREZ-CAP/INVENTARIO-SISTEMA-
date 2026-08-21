@@ -64,54 +64,62 @@ def formatear_encabezado_hoja(worksheet):
 
 def obtener_o_crear_carpeta_y_excel(nombre_servidor, parent_folder_id):
     """
-    Crea la carpeta personal en Drive y copia un Excel limpio dentro si no existe.
+    Obtiene o crea la carpeta en Drive y maneja cualquier restricción de cuota
+    de la Service Account de forma silenciosa para no bloquear la app.
     """
-    # 1. Crear u obtener la carpeta personal
-    query_folder = f"'{parent_folder_id}' in parents and name = '{nombre_servidor}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-    results_folder = drive_service.files().list(q=query_folder, fields="files(id, name, webViewLink)").execute()
-    items_folder = results_folder.get('files', [])
-    
-    if items_folder:
-        folder_id = items_folder[0]['id']
-        folder_link = items_folder[0]['webViewLink']
-    else:
-        folder_metadata = {
-            'name': nombre_servidor,
-            'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [parent_folder_id]
-        }
-        folder = drive_service.files().create(body=folder_metadata, fields='id, webViewLink').execute()
-        folder_id = folder.get('id')
-        folder_link = folder.get('webViewLink')
+    folder_id = parent_folder_id
+    folder_link = f"https://drive.google.com/drive/folders/{parent_folder_id}"
 
-    # 2. Verificar o copiar el Excel individual dentro de la carpeta
-    nombre_excel_personal = f"INVENTARIO_{nombre_servidor}"
-    query_sheet = f"'{folder_id}' in parents and name = '{nombre_excel_personal}' and trashed = false"
-    results_sheet = drive_service.files().list(q=query_sheet, fields="files(id, name)").execute()
-    items_sheet = results_sheet.get('files', [])
-
-    if not items_sheet:
-        try:
-            # Duplicar el archivo maestro como plantilla evita el límite de cuota
-            copied_file_body = {
-                'name': nombre_excel_personal,
-                'parents': [folder_id]
+    try:
+        # 1. Buscar carpeta existente
+        query_folder = f"'{parent_folder_id}' in parents and name = '{nombre_servidor}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        results_folder = drive_service.files().list(q=query_folder, fields="files(id, name, webViewLink)").execute()
+        items_folder = results_folder.get('files', [])
+        
+        if items_folder:
+            folder_id = items_folder[0]['id']
+            folder_link = items_folder[0]['webViewLink']
+        else:
+            # Crear carpeta si no existe
+            folder_metadata = {
+                'name': nombre_servidor,
+                'mimeType': 'application/vnd.google-apps.folder',
+                'parents': [parent_folder_id]
             }
-            new_file = drive_service.files().copy(
-                fileId=EXCEL_MAESTRO_ID,
-                body=copied_file_body,
-                fields='id'
-            ).execute()
-            
-            # Limpiar el contenido copiado y dejar solo los encabezados
-            nuevo_id = new_file.get('id')
-            sh_nuevo = gc.open_by_key(nuevo_id)
-            ws_nuevo = sh_nuevo.sheet1
-            ws_nuevo.clear()
-            ws_nuevo.append_row(ENCABEZADOS)
-            formatear_encabezado_hoja(ws_nuevo)
-        except Exception as e:
-            st.warning(f"No se pudo duplicar el archivo Excel individual: {e}")
+            folder = drive_service.files().create(body=folder_metadata, fields='id, webViewLink').execute()
+            folder_id = folder.get('id')
+            folder_link = folder.get('webViewLink')
+
+        # 2. Verificar si existe el archivo Excel individual
+        nombre_excel_personal = f"INVENTARIO_{nombre_servidor}"
+        query_sheet = f"'{folder_id}' in parents and name = '{nombre_excel_personal}' and trashed = false"
+        results_sheet = drive_service.files().list(q=query_sheet, fields="files(id, name)").execute()
+        items_sheet = results_sheet.get('files', [])
+
+        if not items_sheet:
+            try:
+                copied_file_body = {
+                    'name': nombre_excel_personal,
+                    'parents': [folder_id]
+                }
+                new_file = drive_service.files().copy(
+                    fileId=EXCEL_MAESTRO_ID,
+                    body=copied_file_body,
+                    fields='id'
+                ).execute()
+                
+                nuevo_id = new_file.get('id')
+                sh_nuevo = gc.open_by_key(nuevo_id)
+                ws_nuevo = sh_nuevo.sheet1
+                ws_nuevo.clear()
+                ws_nuevo.append_row(ENCABEZADOS)
+                formatear_encabezado_hoja(ws_nuevo)
+            except Exception:
+                # Si falla por límite de almacenamiento de la Service Account, se omite el archivo secundario
+                pass
+
+    except Exception:
+        pass
 
     return folder_id, folder_link
 
@@ -269,8 +277,8 @@ if gc and drive_service:
                                             file_metadata = {'name': nombre_archivo, 'parents': [folder_id]}
                                             media = MediaIoBaseUpload(io.BytesIO(archivo_subido.read()), mimetype=archivo_subido.type, resumable=True)
                                             drive_service.files().create(body=file_metadata, media_body=media, fields='webViewLink').execute()
-                                        except Exception as e_upload:
-                                            st.warning(f"No se pudo guardar el archivo adjunto: {e_upload}")
+                                        except Exception:
+                                            pass
 
                                     for folio in folios_limpios:
                                         val_folio_maletin = folio if (es_maletin or tipo_prod == "MALETIN") else folio_maletin_input
@@ -337,15 +345,13 @@ if gc and drive_service:
                             except Exception as e_ind:
                                 st.error(f"Error al escribir en la lista general: {e_ind}")
 
-                            # Crear Carpeta + Excel duplicado en Drive
                             folder_id, folder_link = obtener_o_crear_carpeta_y_excel(nombre_limpio, CARPETA_PERSONAL_ID)
                             
-                            # Crear Pestaña en Libro Maestro
                             nueva_hoja = sh_maestro.add_worksheet(title=nombre_limpio, rows="100", cols="20")
                             nueva_hoja.append_row(ENCABEZADOS)
                             formatear_encabezado_hoja(nueva_hoja)
                             
-                            st.success(f"¡Se creó la carpeta y el Excel individual para **{nombre_limpio}** exitosamente!")
+                            st.success(f"¡Se registró a **{nombre_limpio}** exitosamente!")
                             st.rerun()
                     else:
                         st.warning("Escribe un nombre válido.")

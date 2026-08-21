@@ -23,7 +23,6 @@ SCOPE = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-# Encabezados actualizados de Columna A a Columna Q
 ENCABEZADOS = [
     "Folio de producto", "Clave de Producto", "Producto", "Tipo", "Uso",
     "Planillas", "Fecha", "No. de Serie", "Caja", "Estatus",
@@ -51,59 +50,68 @@ def get_services():
 gc, drive_service = get_services()
 
 def formatear_encabezado_hoja(worksheet):
-    """Aplica formato visual a la primera fila (encabezado) de la hoja de cálculo"""
     fmt = {
-        "backgroundColor": {
-            "red": 0.12,
-            "green": 0.31,
-            "blue": 0.47
-        }, # Color Azul Oscuro (#1F4E78)
+        "backgroundColor": {"red": 0.12, "green": 0.31, "blue": 0.47},
         "horizontalAlignment": "CENTER",
         "verticalAlignment": "MIDDLE",
         "textFormat": {
-            "foregroundColor": {
-                "red": 1.0,
-                "green": 1.0,
-                "blue": 1.0
-            }, # Texto Blanco
-            "fontSize": 12, # Tamaño de letra más grande
-            "bold": True # Negrita
+            "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
+            "fontSize": 12,
+            "bold": True
         }
     }
     worksheet.format("A1:Q1", fmt)
 
 def obtener_o_crear_carpeta_y_excel(nombre_servidor, parent_folder_id):
     """
-    Obtiene o crea la carpeta personal en Drive. Captura errores de cuota (storageQuotaExceeded)
-    para evitar que la aplicación colapse si la Service Account supera su espacio predeterminado.
+    Crea la carpeta personal en Drive y copia un Excel limpio dentro si no existe.
     """
-    folder_id = parent_folder_id
-    folder_link = f"https://drive.google.com/drive/folders/{parent_folder_id}"
+    # 1. Crear u obtener la carpeta personal
+    query_folder = f"'{parent_folder_id}' in parents and name = '{nombre_servidor}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    results_folder = drive_service.files().list(q=query_folder, fields="files(id, name, webViewLink)").execute()
+    items_folder = results_folder.get('files', [])
+    
+    if items_folder:
+        folder_id = items_folder[0]['id']
+        folder_link = items_folder[0]['webViewLink']
+    else:
+        folder_metadata = {
+            'name': nombre_servidor,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [parent_folder_id]
+        }
+        folder = drive_service.files().create(body=folder_metadata, fields='id, webViewLink').execute()
+        folder_id = folder.get('id')
+        folder_link = folder.get('webViewLink')
 
-    try:
-        # 1. Buscar o crear carpeta personal
-        query_folder = f"'{parent_folder_id}' in parents and name = '{nombre_servidor}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        results_folder = drive_service.files().list(q=query_folder, fields="files(id, name, webViewLink)").execute()
-        items_folder = results_folder.get('files', [])
-        
-        if items_folder:
-            folder_id = items_folder[0]['id']
-            folder_link = items_folder[0]['webViewLink']
-        else:
-            folder_metadata = {
-                'name': nombre_servidor,
-                'mimeType': 'application/vnd.google-apps.folder',
-                'parents': [parent_folder_id]
+    # 2. Verificar o copiar el Excel individual dentro de la carpeta
+    nombre_excel_personal = f"INVENTARIO_{nombre_servidor}"
+    query_sheet = f"'{folder_id}' in parents and name = '{nombre_excel_personal}' and trashed = false"
+    results_sheet = drive_service.files().list(q=query_sheet, fields="files(id, name)").execute()
+    items_sheet = results_sheet.get('files', [])
+
+    if not items_sheet:
+        try:
+            # Duplicar el archivo maestro como plantilla evita el límite de cuota
+            copied_file_body = {
+                'name': nombre_excel_personal,
+                'parents': [folder_id]
             }
-            folder = drive_service.files().create(body=folder_metadata, fields='id, webViewLink').execute()
-            folder_id = folder.get('id')
-            folder_link = folder.get('webViewLink')
-
-    except Exception as e:
-        if "storageQuotaExceeded" in str(e):
-            st.warning("⚠️ Nota: La cuota de archivos individuales en Drive de la Service Account está llena. La información se guardará únicamente dentro del Libro Maestro.")
-        else:
-            st.warning(f"Aviso en Google Drive: {e}")
+            new_file = drive_service.files().copy(
+                fileId=EXCEL_MAESTRO_ID,
+                body=copied_file_body,
+                fields='id'
+            ).execute()
+            
+            # Limpiar el contenido copiado y dejar solo los encabezados
+            nuevo_id = new_file.get('id')
+            sh_nuevo = gc.open_by_key(nuevo_id)
+            ws_nuevo = sh_nuevo.sheet1
+            ws_nuevo.clear()
+            ws_nuevo.append_row(ENCABEZADOS)
+            formatear_encabezado_hoja(ws_nuevo)
+        except Exception as e:
+            st.warning(f"No se pudo duplicar el archivo Excel individual: {e}")
 
     return folder_id, folder_link
 
@@ -113,20 +121,15 @@ if gc and drive_service:
     try:
         sh_maestro = gc.open_by_key(EXCEL_MAESTRO_ID)
         
-        # Obtener todas las pestañas/hojas existentes
         hojas_objetos = sh_maestro.worksheets()
         nombres_hojas = [h.title for h in hojas_objetos]
-        
-        # Pestañas reservadas
         hojas_reservadas = ["PERSONAL DE SALUD", "PERSONAL DE SALUDA", "PRODUCTOS", "HOJA 1", "PLANTILLA"]
         
-        # Obtener servidores de las pestañas individuales
         lista_servidores = [
             h for h in nombres_hojas 
             if h.strip().upper() not in hojas_reservadas
         ]
         
-        # --- OBTENER CATÁLOGO DESDE LA PESTAÑA "PRODUCTOS" ---
         lista_productos = []
         if "PRODUCTOS" in [h.upper() for h in nombres_hojas]:
             try:
@@ -137,7 +140,6 @@ if gc and drive_service:
             except Exception:
                 pass
 
-        # --- PESTAÑAS DE LA APLICACIÓN ---
         tab_consultar, tab_agregar_persona, tab_eliminar_persona = st.tabs([
             "🔍 Consultar y Asignar Productos", 
             "➕ Agregar Nuevo Servidor",
@@ -173,7 +175,7 @@ if gc and drive_service:
                 with col_fmt:
                     if st.button("🎨 Aplicar formato a encabezados en Google Sheets"):
                         formatear_encabezado_hoja(ws_servidor)
-                        st.success("¡Encabezados formateados con éxito en la hoja de cálculo!")
+                        st.success("¡Encabezados formateados con éxito!")
 
                 st.divider()
                 st.subheader("📋 Configuración del Maletín")
@@ -268,36 +270,36 @@ if gc and drive_service:
                                             media = MediaIoBaseUpload(io.BytesIO(archivo_subido.read()), mimetype=archivo_subido.type, resumable=True)
                                             drive_service.files().create(body=file_metadata, media_body=media, fields='webViewLink').execute()
                                         except Exception as e_upload:
-                                            st.warning(f"No se pudo guardar el archivo adjunto en Drive debido a limitaciones de espacio: {e_upload}")
+                                            st.warning(f"No se pudo guardar el archivo adjunto: {e_upload}")
 
                                     for folio in folios_limpios:
                                         val_folio_maletin = folio if (es_maletin or tipo_prod == "MALETIN") else folio_maletin_input
 
                                         nueva_fila = [
-                                            str(folio),                     # A: Folio de producto
-                                            str(clave_producto),            # B: Clave de Producto
-                                            str(producto_seleccionado),     # C: Producto
-                                            str(tipo_prod),                 # D: Tipo
-                                            str(uso_prod),                  # E: Uso
-                                            str(planillas),                 # F: Planillas
-                                            str(fecha_actual),              # G: Fecha
-                                            str(no_serie),                  # H: No. de Serie
-                                            str(caja),                      # I: Caja
-                                            str(estatus),                   # J: Estatus
-                                            str(val_folio_maletin),         # K: Folio del Maletín
-                                            str(maletin_num_seleccionado),  # L: Número de Maletín
-                                            str(entidad_envio_gen),         # M: Entidad de Envío
-                                            str(registrado_por_gen),        # N: Registrado Por
-                                            "1",                            # O: Cantidad
-                                            str(servidor_seleccionado),     # P: Servidor de la Salud
-                                            str(observaciones)              # Q: Observaciones
+                                            str(folio),
+                                            str(clave_producto),
+                                            str(producto_seleccionado),
+                                            str(tipo_prod),
+                                            str(uso_prod),
+                                            str(planillas),
+                                            str(fecha_actual),
+                                            str(no_serie),
+                                            str(caja),
+                                            str(estatus),
+                                            str(val_folio_maletin),
+                                            str(maletin_num_seleccionado),
+                                            str(entidad_envio_gen),
+                                            str(registrado_por_gen),
+                                            "1",
+                                            str(servidor_seleccionado),
+                                            str(observaciones)
                                         ]
                                         ws_servidor.append_row(nueva_fila)
 
-                                    st.success(f"¡Se guardaron {len(folios_limpios)} registro(s) en la pestaña de **{servidor_seleccionado}**!")
+                                    st.success(f"¡Se guardaron {len(folios_limpios)} registro(s)!")
                                     st.rerun()
                                 else:
-                                    st.warning(f"Ingresa los {cantidad} folios requeridos (llevas {len(folios_limpios)} de {cantidad}).")
+                                    st.warning(f"Ingresa los {cantidad} folios requeridos.")
                 else:
                     st.info("👈 Ingresa el **Folio/Clave del Maletín** para desbloquear los productos.")
 
@@ -317,7 +319,6 @@ if gc and drive_service:
                         if nombre_limpio in [n.strip().upper() for n in nombres_hojas]:
                             st.warning("Ya existe un Servidor con este nombre.")
                         else:
-                            # 1. Localizar la pestaña de lista general ("PERSONAL DE SALUD" / "PERSONAL DE SALUDA")
                             try:
                                 ws_indice = None
                                 for sheet in sh_maestro.worksheets():
@@ -336,15 +337,15 @@ if gc and drive_service:
                             except Exception as e_ind:
                                 st.error(f"Error al escribir en la lista general: {e_ind}")
 
-                            # 2. Crear/Obtener carpeta personal en Google Drive
+                            # Crear Carpeta + Excel duplicado en Drive
                             folder_id, folder_link = obtener_o_crear_carpeta_y_excel(nombre_limpio, CARPETA_PERSONAL_ID)
                             
-                            # 3. Crear nueva pestaña individual dentro del Libro Maestro
+                            # Crear Pestaña en Libro Maestro
                             nueva_hoja = sh_maestro.add_worksheet(title=nombre_limpio, rows="100", cols="20")
                             nueva_hoja.append_row(ENCABEZADOS)
                             formatear_encabezado_hoja(nueva_hoja)
                             
-                            st.success(f"¡Se agregó **{nombre_limpio}** a la lista del personal y se creó su pestaña maestro!")
+                            st.success(f"¡Se creó la carpeta y el Excel individual para **{nombre_limpio}** exitosamente!")
                             st.rerun()
                     else:
                         st.warning("Escribe un nombre válido.")
@@ -386,7 +387,7 @@ if gc and drive_service:
                         hoja_borrar = sh_maestro.worksheet(servidor_a_eliminar)
                         sh_maestro.del_worksheet(hoja_borrar)
                         
-                        st.success(f"¡**{servidor_a_eliminar}** eliminado con éxito del registro y de las pestañas!")
+                        st.success(f"¡**{servidor_a_eliminar}** eliminado con éxito!")
                         st.rerun()
                     except Exception as err:
                         st.error(f"Error al eliminar: {err}")

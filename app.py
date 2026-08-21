@@ -94,11 +94,11 @@ if gc and drive_service:
         else:
             df_general = pd.DataFrame(columns=ENCABEZADOS)
 
-        # Normalizar nombres de columnas a mayúsculas sin espacios
+        # Normalizar nombres de columnas
         columnas_normalizadas = {col: col.strip().upper() for col in df_general.columns}
         df_general.rename(columns=columnas_normalizadas, inplace=True)
 
-        # Buscar la columna del Servidor de la Salud de forma flexible
+        # Buscar la columna del Servidor de la Salud
         col_servidor = None
         for col in df_general.columns:
             if "SERVIDOR" in col and "SALUD" in col:
@@ -133,8 +133,9 @@ if gc and drive_service:
         # === PESTAÑA 1: CONSULTA Y ASIGNACIÓN ===
         with tab_consultar:
             if lista_servidores:
+                # PASO 1: Seleccionar Servidor de la Salud
                 servidor_seleccionado = st.selectbox(
-                    "Selecciona un Servidor de la Salud:", 
+                    "1️⃣ Selecciona un Servidor de la Salud:", 
                     options=lista_servidores
                 )
                 
@@ -151,27 +152,37 @@ if gc and drive_service:
                 st.markdown(f"📂 **Carpeta en Google Drive:** [Abrir carpeta personal de {servidor_seleccionado}]({folder_link})")
                 
                 st.divider()
-                st.subheader("📋 Asignación de Productos por Folio de Maletín")
+                st.subheader("📋 Configuración del Maletín")
                 
-                # Paso 1: Pedir primero el Folio del Maletín
-                folio_maletin_input = st.text_input(
-                    "1️⃣ Ingresa el Folio del Maletín (Columna K):",
-                    placeholder="Ej. MAL-2024-001"
-                ).strip()
+                # PASO 2 Y 3: Seleccionar Número de Maletín e Ingresar su Folio
+                col1, col2 = st.columns(2)
+                with col1:
+                    opciones_maletin = [f"Maletín {i}" for i in range(1, 21)]  # Genera Maletín 1 hasta Maletín 20
+                    maletin_num_seleccionado = st.selectbox(
+                        "2️⃣ Selecciona el número de Maletín:", 
+                        options=opciones_maletin
+                    )
+                with col2:
+                    folio_maletin_input = st.text_input(
+                        f"3️⃣ Ingresa el Folio/Clave para **{maletin_num_seleccionado}** (Columna K):",
+                        placeholder="Ej. MAL-2024-001"
+                    ).strip()
 
+                st.divider()
+
+                # PASO 4: Desplegar Productos solo cuando se haya ingresado el folio del maletín
                 if folio_maletin_input:
-                    st.success(f"✅ Folio de Maletín activo: **{folio_maletin_input}**")
+                    st.success(f"✅ Configuración lista: **{maletin_num_seleccionado}** con Folio **{folio_maletin_input}** para **{servidor_seleccionado}**")
                     
-                    # Paso 2: Desplegar selector de productos del catálogo
-                    st.markdown("#### 2️⃣ Selección e Integración del Producto")
+                    st.subheader("📦 Selección e Integración del Producto")
                     
                     if lista_productos:
                         producto_seleccionado = st.selectbox(
-                            "Selecciona un producto del catálogo:", 
+                            "4️⃣ Selecciona un producto del catálogo:", 
                             options=lista_productos
                         )
                     else:
-                        producto_seleccionado = st.text_input("Nombre del producto del catálogo:")
+                        producto_seleccionado = st.text_input("4️⃣ Nombre del producto del catálogo:")
                     
                     if producto_seleccionado:
                         es_maletin = "MALETIN" in producto_seleccionado.upper()
@@ -229,7 +240,6 @@ if gc and drive_service:
 
                                     # Agregar una fila por cada folio ingresado
                                     for folio in folios_limpios:
-                                        # Si el producto seleccionado en sí mismo es un maletín, su folio de maletín es su propio folio de producto
                                         val_folio_maletin = folio if (es_maletin or tipo_prod == "MALETIN") else folio_maletin_input
 
                                         nueva_fila = [
@@ -252,12 +262,12 @@ if gc and drive_service:
                                         ]
                                         ws_inventario.append_row(nueva_fila)
 
-                                    st.success(f"¡Se registraron exitosamente {len(folios_limpios)} unidad(es) de **{producto_seleccionado}** para el maletín **{folio_maletin_input}**!")
+                                    st.success(f"¡Se registraron exitosamente {len(folios_limpios)} unidad(es) de **{producto_seleccionado}** para {maletin_num_seleccionado} (Folio: {folio_maletin_input})!")
                                     st.rerun()
                                 else:
                                     st.warning(f"Ingresa los {cantidad} folios requeridos (llevas {len(folios_limpios)} de {cantidad}).")
                 else:
-                    st.info("👈 Por favor ingresa el **Folio del Maletín** arriba para desplegar el catálogo de productos.")
+                    st.info("👈 Ingresa el **Folio/Clave del Maletín** en el paso 3 para desbloquear y desplegar la lista de productos del catálogo.")
 
             else:
                 st.info("No se encontraron registros de Servidores de la Salud en la hoja. Agrega uno nuevo en la siguiente pestaña.")
@@ -275,10 +285,8 @@ if gc and drive_service:
                         if nombre_limpio in [s.upper() for s in lista_servidores]:
                             st.warning("Este Servidor ya existe en la lista.")
                         else:
-                            # Crear carpeta en Google Drive
                             folder_id, folder_link = obtener_o_crear_carpeta(nombre_limpio, CARPETA_PERSONAL_ID)
                             
-                            # Insertar registro inicial
                             fecha_actual = datetime.now().strftime("%m/%d/%y %H:%M")
                             fila_inicial = [
                                 "N/A", "N/A", "REGISTRO INICIAL", "SISTEMA", "N/A",

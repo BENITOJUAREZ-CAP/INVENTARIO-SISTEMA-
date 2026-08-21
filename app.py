@@ -99,8 +99,7 @@ if gc and drive_service:
         nombres_hojas = [h.title for h in hojas_objetos]
         
         # Pestañas reservadas
-        HOJA_INDICE_NOMBRE = "PERSONAL DE SALUD"
-        hojas_reservadas = [HOJA_INDICE_NOMBRE.upper(), "PRODUCTOS", "HOJA 1", "PLANTILLA"]
+        hojas_reservadas = ["PERSONAL DE SALUD", "PERSONAL DE SALUDA", "PRODUCTOS", "HOJA 1", "PLANTILLA"]
         
         # Obtener servidores de las pestañas individuales
         lista_servidores = [
@@ -296,11 +295,12 @@ if gc and drive_service:
                         if nombre_limpio in [n.strip().upper() for n in nombres_hojas]:
                             st.warning("Ya existe un Servidor con este nombre.")
                         else:
-                            # 1. Agregar a la pestaña 'PERSONAL DE SALUD' de forma segura
+                            # 1. Localizar la pestaña de lista general ("PERSONAL DE SALUD" / "PERSONAL DE SALUDA")
                             try:
                                 ws_indice = None
                                 for sheet in sh_maestro.worksheets():
-                                    if sheet.title.strip().upper() == "PERSONAL DE SALUD":
+                                    title_clean = sheet.title.strip().upper()
+                                    if "PERSONAL DE SALUD" in title_clean or "PERSONAL DE SALUDA" in title_clean:
                                         ws_indice = sheet
                                         break
                                 
@@ -308,11 +308,16 @@ if gc and drive_service:
                                     ws_indice = sh_maestro.add_worksheet(title="PERSONAL DE SALUD", rows="100", cols="5")
                                     ws_indice.append_row(["PERSONAL DE SALUD"])
                                 
-                                ws_indice.append_row([nombre_limpio])
+                                # Encontrar la primera fila realmente vacía en la Columna A
+                                col_a_values = ws_indice.col_values(1)
+                                primera_fila_vacia = len(col_a_values) + 1
+                                
+                                # Insertar en la posición consecutiva exacta (evita saltos a filas lejanas)
+                                ws_indice.update_cell(primera_fila_vacia, 1, nombre_limpio)
                             except Exception as e_ind:
-                                st.error(f"Error al escribir en PERSONAL DE SALUD: {e_ind}")
+                                st.error(f"Error al escribir en la lista general: {e_ind}")
 
-                            # 2. Crear carpeta en Drive
+                            # 2. Crear carpeta en Google Drive
                             folder_id, folder_link = obtener_o_crear_carpeta(nombre_limpio, CARPETA_PERSONAL_ID)
                             
                             # 3. Crear nueva pestaña individual
@@ -320,7 +325,7 @@ if gc and drive_service:
                             nueva_hoja.append_row(ENCABEZADOS)
                             formatear_encabezado_hoja(nueva_hoja)
                             
-                            st.success(f"¡Se agregó **{nombre_limpio}** a 'PERSONAL DE SALUD', se creó su pestaña y su carpeta en Drive!")
+                            st.success(f"¡Se agregó **{nombre_limpio}** a la lista del personal, se creó su pestaña y su carpeta en Drive!")
                             st.rerun()
                     else:
                         st.warning("Escribe un nombre válido.")
@@ -347,7 +352,8 @@ if gc and drive_service:
                         try:
                             ws_indice = None
                             for sheet in sh_maestro.worksheets():
-                                if sheet.title.strip().upper() == "PERSONAL DE SALUD":
+                                title_clean = sheet.title.strip().upper()
+                                if "PERSONAL DE SALUD" in title_clean or "PERSONAL DE SALUDA" in title_clean:
                                     ws_indice = sheet
                                     break
                             

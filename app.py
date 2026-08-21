@@ -23,11 +23,11 @@ SCOPE = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-# Encabezados exactos de Columna A a Columna P
+# Encabezados actualizados de Columna A a Columna Q
 ENCABEZADOS = [
     "Folio de producto", "Clave de Producto", "Producto", "Tipo", "Uso",
     "Planillas", "Fecha", "No. de Serie", "Caja", "Estatus",
-    "Folio del Maletín", "Entidad de Envío", "Registrado Por",
+    "Folio del Maletín", "Número de Maletín", "Entidad de Envío", "Registrado Por",
     "Cantidad", "Servidor de la Salud", "Observaciones"
 ]
 
@@ -76,7 +76,7 @@ if gc and drive_service:
         hojas_objetos = sh_maestro.worksheets()
         nombres_hojas = [h.title for h in hojas_objetos]
         
-        # Pestañas principales reservadas
+        # Pestañas reservadas
         HOJA_INDICE_NOMBRE = "PERSONAL DE SALUD"
         hojas_reservadas = [HOJA_INDICE_NOMBRE.upper(), "PRODUCTOS", "HOJA 1", "PLANTILLA"]
         
@@ -216,15 +216,27 @@ if gc and drive_service:
                                         val_folio_maletin = folio if (es_maletin or tipo_prod == "MALETIN") else folio_maletin_input
 
                                         nueva_fila = [
-                                            str(folio), str(clave_producto), str(producto_seleccionado), 
-                                            str(tipo_prod), str(uso_prod), str(planillas), str(fecha_actual), 
-                                            str(no_serie), str(caja), str(estatus), str(val_folio_maletin), 
-                                            str(entidad_envio), str(registrado_por), "1", 
-                                            str(servidor_seleccionado), str(observaciones)
+                                            str(folio),                     # A: Folio de producto
+                                            str(clave_producto),            # B: Clave de Producto
+                                            str(producto_seleccionado),     # C: Producto
+                                            str(tipo_prod),                 # D: Tipo
+                                            str(uso_prod),                  # E: Uso
+                                            str(planillas),                 # F: Planillas
+                                            str(fecha_actual),              # G: Fecha
+                                            str(no_serie),                  # H: No. de Serie
+                                            str(caja),                      # I: Caja
+                                            str(estatus),                   # J: Estatus
+                                            str(val_folio_maletin),         # K: Folio del Maletín
+                                            str(maletin_num_seleccionado),  # L: Número de Maletín ("Maletín 1", "Maletín 2", etc.)
+                                            str(entidad_envio),             # M: Entidad de Envío
+                                            str(registrado_por),            # N: Registrado Por
+                                            "1",                            # O: Cantidad
+                                            str(servidor_seleccionado),     # P: Servidor de la Salud
+                                            str(observaciones)              # Q: Observaciones
                                         ]
                                         ws_servidor.append_row(nueva_fila)
 
-                                    st.success(f"¡Se guardaron {len(folios_limpios)} registro(s) en la pestaña de **{servidor_seleccionado}**!")
+                                    st.success(f"¡Se guardaron {len(folios_limpios)} registro(s) en la pestaña de **{servidor_seleccionado}** con **{maletin_num_seleccionado}**!")
                                     st.rerun()
                                 else:
                                     st.warning(f"Ingresa los {cantidad} folios requeridos (llevas {len(folios_limpios)} de {cantidad}).")
@@ -247,20 +259,14 @@ if gc and drive_service:
                         if nombre_limpio in [n.upper() for n in nombres_hojas]:
                             st.warning("Ya existe un Servidor con este nombre.")
                         else:
-                            # 1. Agregar el nombre en la lista de la pestaña "PERSONAL DE SALUD"
                             try:
                                 ws_indice = sh_maestro.worksheet("PERSONAL DE SALUD")
                                 ws_indice.append_row([nombre_limpio])
                             except Exception:
-                                pass # Si la pestaña no existe por alguna razón, continúa
+                                pass
 
-                            # 2. Crear su carpeta en Google Drive
                             folder_id, folder_link = obtener_o_crear_carpeta(nombre_limpio, CARPETA_PERSONAL_ID)
-                            
-                            # 3. Crear su NUEVA PESTAÑA individual
                             nueva_hoja = sh_maestro.add_worksheet(title=nombre_limpio, rows="100", cols="20")
-                            
-                            # 4. Insertar la fila de encabezados estándar
                             nueva_hoja.append_row(ENCABEZADOS)
                             
                             st.success(f"¡Se agregó **{nombre_limpio}** a 'PERSONAL DE SALUD', se creó su pestaña y su carpeta en Drive!")
@@ -287,7 +293,6 @@ if gc and drive_service:
                 
                 if st.button("🗑️ Eliminar Definitivamente", type="primary", disabled=not confirmacion):
                     try:
-                        # 1. Eliminar de la hoja índice "PERSONAL DE SALUD" si existe ahí
                         try:
                             ws_indice = sh_maestro.worksheet("PERSONAL DE SALUD")
                             celda = ws_indice.find(servidor_a_eliminar)
@@ -296,7 +301,6 @@ if gc and drive_service:
                         except Exception:
                             pass
 
-                        # 2. Eliminar su pestaña individual
                         hoja_borrar = sh_maestro.worksheet(servidor_a_eliminar)
                         sh_maestro.del_worksheet(hoja_borrar)
                         

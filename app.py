@@ -132,6 +132,7 @@ if gc and drive_service:
                 st.divider()
                 st.subheader("📋 Configuración del Maletín")
                 
+                # Fila 1 de Configuración: Número de Maletín y Folio/Clave
                 col1, col2 = st.columns(2)
                 with col1:
                     opciones_maletin = [f"Maletín {i}" for i in range(1, 21)]
@@ -145,19 +146,32 @@ if gc and drive_service:
                         placeholder="Ej. MAL-2024-001"
                     ).strip()
 
+                # Fila 2 de Configuración: Entidad de Envío y Registrado Por (ColM y ColN generales)
+                col3, col4 = st.columns(2)
+                with col3:
+                    entidad_envio_gen = st.text_input(
+                        "4️⃣ Entidad de Envío (Columna M):", 
+                        value="CIUDAD DE MEXICO"
+                    ).strip()
+                with col4:
+                    registrado_por_gen = st.text_input(
+                        "5️⃣ Registrado Por (Columna N):", 
+                        value="INVENTARIO DE SALUD 20"
+                    ).strip()
+
                 st.divider()
 
                 if folio_maletin_input:
-                    st.success(f"✅ Configuración lista: **{maletin_num_seleccionado}** con Folio **{folio_maletin_input}** para **{servidor_seleccionado}**")
+                    st.success(f"✅ Configuración lista: **{maletin_num_seleccionado}** | Folio: **{folio_maletin_input}** | Entidad: **{entidad_envio_gen}** | Registrado por: **{registrado_por_gen}**")
                     st.subheader("📦 Selección e Integración del Producto")
                     
                     if lista_productos:
                         producto_seleccionado = st.selectbox(
-                            "4️⃣ Selecciona un producto del catálogo:", 
+                            "Selecciona un producto del catálogo:", 
                             options=lista_productos
                         )
                     else:
-                        producto_seleccionado = st.text_input("4️⃣ Nombre del producto del catálogo:")
+                        producto_seleccionado = st.text_input("Nombre del producto del catálogo:")
                     
                     if producto_seleccionado:
                         es_maletin = "MALETIN" in producto_seleccionado.upper()
@@ -178,7 +192,7 @@ if gc and drive_service:
                             
                             st.divider()
                             
-                            c1, c2, c3 = st.columns(3)
+                            c1, c2 = st.columns(2)
                             with c1:
                                 clave_producto = st.text_input("Clave de Producto:")
                                 tipo_prod = st.selectbox(
@@ -192,9 +206,6 @@ if gc and drive_service:
                                 no_serie = st.text_input("No. de Serie (Opcional):")
                                 caja = st.text_input("Caja (Opcional):")
                                 estatus = st.selectbox("Estatus:", ["EN ALMACEN", "EN TRANSITO", "ENTREGADO"])
-                            with c3:
-                                entidad_envio = st.text_input("Entidad de Envío:", value="CIUDAD DE MEXICO")
-                                registrado_por = st.text_input("Registrado Por:", value="INVENTARIO DE SALUD 20")
 
                             observaciones = st.text_area("Observaciones:")
                             archivo_subido = st.file_uploader("Adjuntar comprobante (Opcional):", type=["pdf", "png", "jpg", "jpeg"])
@@ -227,21 +238,21 @@ if gc and drive_service:
                                             str(caja),                      # I: Caja
                                             str(estatus),                   # J: Estatus
                                             str(val_folio_maletin),         # K: Folio del Maletín
-                                            str(maletin_num_seleccionado),  # L: Número de Maletín ("Maletín 1", "Maletín 2", etc.)
-                                            str(entidad_envio),             # M: Entidad de Envío
-                                            str(registrado_por),            # N: Registrado Por
+                                            str(maletin_num_seleccionado),  # L: Número de Maletín
+                                            str(entidad_envio_gen),         # M: Entidad de Envío (General)
+                                            str(registrado_por_gen),        # N: Registrado Por (General)
                                             "1",                            # O: Cantidad
                                             str(servidor_seleccionado),     # P: Servidor de la Salud
                                             str(observaciones)              # Q: Observaciones
                                         ]
                                         ws_servidor.append_row(nueva_fila)
 
-                                    st.success(f"¡Se guardaron {len(folios_limpios)} registro(s) en la pestaña de **{servidor_seleccionado}** con **{maletin_num_seleccionado}**!")
+                                    st.success(f"¡Se guardaron {len(folios_limpios)} registro(s) en la pestaña de **{servidor_seleccionado}**!")
                                     st.rerun()
                                 else:
                                     st.warning(f"Ingresa los {cantidad} folios requeridos (llevas {len(folios_limpios)} de {cantidad}).")
                 else:
-                    st.info("👈 Ingresa el **Folio/Clave del Maletín** en el paso 3 para desbloquear los productos.")
+                    st.info("👈 Ingresa el **Folio/Clave del Maletín** para desbloquear los productos.")
 
             else:
                 st.info("No se encontraron pestañas de Servidores de la Salud.")

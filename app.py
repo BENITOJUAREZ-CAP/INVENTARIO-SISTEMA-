@@ -43,7 +43,6 @@ def get_services():
 gc, drive_service = get_services()
 
 def obtener_o_crear_carpeta(nombre_servidor, parent_folder_id):
-    """Busca si existe la carpeta del servidor; si no, la crea."""
     query = f"'{parent_folder_id}' in parents and name = '{nombre_servidor}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
     results = drive_service.files().list(q=query, fields="files(id, name, webViewLink)").execute()
     items = results.get('files', [])
@@ -69,105 +68,117 @@ if gc and drive_service:
         
         if data:
             df = pd.DataFrame(data)
-            
-            # --- SECCIÓN 1: SELECCIONAR SERVIDOR ---
-            st.subheader("🔍 Seleccionar Servidor de la Salud")
             columna_nombre = "SERVIDOR DE LA SALUD"
             
             if columna_nombre in df.columns:
                 lista_servidores = df[columna_nombre].dropna().unique().tolist()
-                servidor_seleccionado = st.selectbox(
-                    "Selecciona o busca un Servidor de la Salud:", 
-                    options=lista_servidores
-                )
                 
-                # Mostrar registros actuales del servidor seleccionado
-                df_filtrado = df[df[columna_nombre] == servidor_seleccionado]
-                st.write(f"### Inventario actual de: **{servidor_seleccionado}**")
-                st.dataframe(df_filtrado, use_container_width=True)
+                # --- PESTAÑAS DE NAVEGACIÓN ---
+                tab_consultar, tab_agregar_persona, tab_eliminar_persona = st.tabs([
+                    "🔍 Consultar y Registrar Productos", 
+                    "➕ Agregar Nuevo Servidor", 
+                    "🗑️ Eliminar Servidor"
+                ])
                 
-                # Gestión de Carpeta en Google Drive
-                folder_id, folder_link = obtener_o_crear_carpeta(servidor_seleccionado, CARPETA_PERSONAL_ID)
-                st.markdown(f"📂 **Carpeta en Google Drive:** [Abrir carpeta personal de {servidor_seleccionado}]({folder_link})")
-                
-                st.divider()
-                
-                # --- SECCIÓN 2: FORMULARIO DE CAPTURA POR MALETÍN ---
-                st.subheader("📝 Capturar / Asignar Producto a Maletín")
-                
-                with st.form("form_maletines", clear_on_submit=True):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Selección de Maletín (Máximo 4)
-                        maletin = st.selectbox(
-                            "Selecciona el Maletín:",
-                            options=["Maletín 1", "Maletín 2", "Maletín 3", "Maletín 4"]
-                        )
-                        
-                        # Nombre / Descripción del Producto
-                        producto = st.text_input("Nombre / Descripción del Producto:")
-                        
-                    with col2:
-                        # Cantidad de este producto
-                        cantidad = st.number_input("Cantidad (¿Cuántos son?):", min_value=1, value=1, step=1)
-                        
-                        # Folio o Número de Serie del producto
-                        folio = st.text_input("Folio / Número de Serie:")
-                    
-                    observaciones = st.text_area("Observaciones del estado del producto/maletín:")
-                    
-                    # Cargar archivo de resguardo si aplica
-                    archivo_subido = st.file_uploader(
-                        "Adjuntar archivo/resguardo en PDF o imagen (Opcional):", 
-                        type=["pdf", "png", "jpg", "jpeg"]
+                # === PESTAÑA 1: CONSULTA Y REGISTRO DE MALETINES ===
+                with tab_consultar:
+                    servidor_seleccionado = st.selectbox(
+                        "Selecciona un Servidor de la Salud:", 
+                        options=lista_servidores
                     )
                     
-                    btn_guardar = st.form_submit_button("💾 Guardar Registro de Producto")
+                    df_filtrado = df[df[columna_nombre] == servidor_seleccionado]
+                    st.write(f"### Inventario actual de: **{servidor_seleccionado}**")
+                    st.dataframe(df_filtrado, use_container_width=True)
                     
-                    if btn_guardar:
-                        if producto and folio:
-                            enlace_archivo = "Sin archivo"
+                    folder_id, folder_link = obtener_o_crear_carpeta(servidor_seleccionado, CARPETA_PERSONAL_ID)
+                    st.markdown(f"📂 **Carpeta en Google Drive:** [Abrir carpeta personal de {servidor_seleccionado}]({folder_link})")
+                    
+                    st.divider()
+                    
+                    st.subheader("📝 Capturar / Asignar Producto a Maletín")
+                    with st.form("form_maletines", clear_on_submit=True):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            maletin = st.selectbox("Selecciona el Maletín:", ["Maletín 1", "Maletín 2", "Maletín 3", "Maletín 4"])
+                            producto = st.text_input("Nombre / Descripción del Producto:")
+                        with col2:
+                            cantidad = st.number_input("Cantidad (¿Cuántos son?):", min_value=1, value=1, step=1)
+                            folio = st.text_input("Folio / Número de Serie:")
+                        
+                        observaciones = st.text_area("Observaciones:")
+                        archivo_subido = st.file_uploader("Adjuntar archivo (PDF/Imagen):", type=["pdf", "png", "jpg", "jpeg"])
+                        
+                        btn_guardar = st.form_submit_button("💾 Guardar Registro de Producto")
+                        
+                        if btn_guardar:
+                            if producto and folio:
+                                enlace_archivo = "Sin archivo"
+                                if archivo_subido is not None:
+                                    file_metadata = {'name': f"{folio}_{archivo_subido.name}", 'parents': [folder_id]}
+                                    media = MediaIoBaseUpload(io.BytesIO(archivo_subido.read()), mimetype=archivo_subido.type, resumable=True)
+                                    archivo_drive = drive_service.files().create(body=file_metadata, media_body=media, fields='webViewLink').execute()
+                                    enlace_archivo = archivo_drive.get('webViewLink')
+                                
+                                nueva_fila = [servidor_seleccionado, maletin, producto, cantidad, folio, observaciones, enlace_archivo]
+                                worksheet.append_row(nueva_fila)
+                                st.success(f"¡Producto '{producto}' guardado exitosamente!")
+                                st.rerun()
+                            else:
+                                st.warning("Ingresa el Nombre del Producto y el Folio/Serie.")
+
+                # === PESTAÑA 2: AGREGAR NUEVO SERVIDOR ===
+                with tab_agregar_persona:
+                    st.subheader("➕ Agregar Nuevo Servidor de la Salud")
+                    with st.form("form_nuevo_servidor", clear_on_submit=True):
+                        nuevo_nombre = st.text_input("Nombre completo del Servidor de la Salud:")
+                        btn_agregar = st.form_submit_button("➕ Registrar Servidor")
+                        
+                        if btn_agregar:
+                            if nuevo_nombre.strip():
+                                if nuevo_nombre.strip() in lista_servidores:
+                                    st.warning("Este Servidor ya existe en la lista.")
+                                else:
+                                    # Fila inicial de registro
+                                    nueva_fila = [nuevo_nombre.strip(), "Sin Maletín", "Sin Producto", 0, "N/A", "Registro inicial", "Sin archivo"]
+                                    worksheet.append_row(nueva_fila)
+                                    
+                                    # Crear su carpeta en Drive
+                                    obtener_o_crear_carpeta(nuevo_nombre.strip(), CARPETA_PERSONAL_ID)
+                                    
+                                    st.success(f"¡Servidor **{nuevo_nombre.strip()}** agregado exitosamente!")
+                                    st.rerun()
+                            else:
+                                st.warning("Escribe un nombre válido.")
+
+                # === PESTAÑA 3: ELIMINAR SERVIDOR ===
+                with tab_eliminar_persona:
+                    st.subheader("🗑️ Eliminar Servidor de la Salud")
+                    st.error("⚠️ Esta acción eliminará todas las filas vinculadas a este Servidor en el Excel Maestro.")
+                    
+                    servidor_a_eliminar = st.selectbox(
+                        "Selecciona el Servidor que deseas eliminar:", 
+                        options=lista_servidores,
+                        key="select_eliminar"
+                    )
+                    
+                    confirmar = st.checkbox(f"Confirmo que deseo borrar a **{servidor_a_eliminar}**")
+                    btn_eliminar = st.button("🗑️ Eliminar Definativamente", type="primary")
+                    
+                    if btn_eliminar:
+                        if confirmar:
+                            # Buscar y borrar todas las filas que coincidan
+                            cell_list = worksheet.findall(servidor_a_eliminar)
+                            rows_to_delete = sorted(list(set([cell.row for cell in cell_list])), reverse=True)
                             
-                            # Subir archivo si fue adjuntado
-                            if archivo_subido is not None:
-                                file_metadata = {
-                                    'name': f"{folio}_{archivo_subido.name}",
-                                    'parents': [folder_id]
-                                }
-                                media = MediaIoBaseUpload(
-                                    io.BytesIO(archivo_subido.read()), 
-                                    mimetype=archivo_subido.type, 
-                                    resumable=True
-                                )
-                                archivo_drive = drive_service.files().create(
-                                    body=file_metadata, 
-                                    media_body=media, 
-                                    fields='webViewLink'
-                                ).execute()
-                                enlace_archivo = archivo_drive.get('webViewLink')
-                            
-                            # Estructura de fila a insertar en Excel Maestro
-                            nueva_fila = [
-                                servidor_seleccionado, 
-                                maletin, 
-                                producto, 
-                                cantidad, 
-                                folio, 
-                                observaciones, 
-                                enlace_archivo
-                            ]
-                            
-                            worksheet.append_row(nueva_fila)
-                            st.success(f"¡Se registró correctamente el producto '{producto}' en {maletin}!")
-                            st.cache_data.clear()
+                            for row_idx in rows_to_delete:
+                                worksheet.delete_rows(row_idx)
+                                
+                            st.success(f"Se ha eliminado a **{servidor_a_eliminar}** y sus registros.")
+                            st.rerun()
                         else:
-                            st.warning("Por favor ingresa al menos el Nombre del Producto y el Folio/Serie.")
-                            
-            else:
-                st.warning(f"No se encontró la columna '{columna_nombre}' en la hoja.")
-                st.dataframe(df, use_container_width=True)
-                
+                            st.warning("Marca la casilla de confirmación para poder proceder.")
+
     except Exception as e:
         st.error("Error al procesar la solicitud:")
         st.exception(e)

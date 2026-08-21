@@ -72,13 +72,19 @@ def formatear_encabezado_hoja(worksheet):
     }
     worksheet.format("A1:Q1", fmt)
 
-def obtener_o_crear_carpeta(nombre_servidor, parent_folder_id):
-    query = f"'{parent_folder_id}' in parents and name = '{nombre_servidor}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-    results = drive_service.files().list(q=query, fields="files(id, name, webViewLink)").execute()
-    items = results.get('files', [])
+def obtener_o_crear_carpeta_y_excel(nombre_servidor, parent_folder_id):
+    """
+    Crea/Obtiene la carpeta personal en Drive y asegura
+    que dentro exista un archivo de Excel individual inicializado.
+    """
+    # 1. Buscar o crear carpeta personal
+    query_folder = f"'{parent_folder_id}' in parents and name = '{nombre_servidor}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    results_folder = drive_service.files().list(q=query_folder, fields="files(id, name, webViewLink)").execute()
+    items_folder = results_folder.get('files', [])
     
-    if items:
-        return items[0]['id'], items[0]['webViewLink']
+    if items_folder:
+        folder_id = items_folder[0]['id']
+        folder_link = items_folder[0]['webViewLink']
     else:
         folder_metadata = {
             'name': nombre_servidor,
@@ -86,7 +92,34 @@ def obtener_o_crear_carpeta(nombre_servidor, parent_folder_id):
             'parents': [parent_folder_id]
         }
         folder = drive_service.files().create(body=folder_metadata, fields='id, webViewLink').execute()
-        return folder.get('id'), folder.get('webViewLink')
+        folder_id = folder.get('id')
+        folder_link = folder.get('webViewLink')
+
+    # 2. Buscar o crear archivo de Google Sheet dentro de esa carpeta personal
+    nombre_excel_personal = f"INVENTARIO_{nombre_servidor}"
+    query_sheet = f"'{folder_id}' in parents and name = '{nombre_excel_personal}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false"
+    results_sheet = drive_service.files().list(q=query_sheet, fields="files(id, name)").execute()
+    items_sheet = results_sheet.get('files', [])
+
+    if not items_sheet:
+        sheet_metadata = {
+            'name': nombre_excel_personal,
+            'mimeType': 'application/vnd.google-apps.spreadsheet',
+            'parents': [folder_id]
+        }
+        created_sheet = drive_service.files().create(body=sheet_metadata, fields='id').execute()
+        excel_personal_id = created_sheet.get('id')
+
+        # Inicializar encabezados y formato en el nuevo Excel personal de la carpeta
+        try:
+            sh_personal = gc.open_by_key(excel_personal_id)
+            ws_personal = sh_personal.sheet1
+            ws_personal.append_row(ENCABEZADOS)
+            formatear_encabezado_hoja(ws_personal)
+        except Exception as e_sheet:
+            st.error(f"Advertencia al inicializar el Excel personal: {e_sheet}")
+
+    return folder_id, folder_link
 
 st.title("🧰 Control de Inventario por Maletines")
 
@@ -149,7 +182,7 @@ if gc and drive_service:
                 
                 col_folder, col_fmt = st.columns([2, 1])
                 with col_folder:
-                    folder_id, folder_link = obtener_o_crear_carpeta(servidor_seleccionado, CARPETA_PERSONAL_ID)
+                    folder_id, folder_link = obtener_o_crear_carpeta_y_excel(servidor_seleccionado, CARPETA_PERSONAL_ID)
                     st.markdown(f"📂 **Carpeta en Google Drive:** [Abrir carpeta personal de {servidor_seleccionado}]({folder_link})")
                 with col_fmt:
                     if st.button("🎨 Aplicar formato a encabezados en Google Sheets"):
@@ -312,20 +345,20 @@ if gc and drive_service:
                                 col_a_values = ws_indice.col_values(1)
                                 primera_fila_vacia = len(col_a_values) + 1
                                 
-                                # Insertar en la posición consecutiva exacta (evita saltos a filas lejanas)
+                                # Insertar en la posición consecutiva exacta
                                 ws_indice.update_cell(primera_fila_vacia, 1, nombre_limpio)
                             except Exception as e_ind:
                                 st.error(f"Error al escribir en la lista general: {e_ind}")
 
-                            # 2. Crear carpeta en Google Drive
-                            folder_id, folder_link = obtener_o_crear_carpeta(nombre_limpio, CARPETA_PERSONAL_ID)
+                            # 2. Crear carpeta personal en Google Drive Y su Excel interno
+                            folder_id, folder_link = obtener_o_crear_carpeta_y_excel(nombre_limpio, CARPETA_PERSONAL_ID)
                             
-                            # 3. Crear nueva pestaña individual
+                            # 3. Crear nueva pestaña individual dentro del Libro Maestro
                             nueva_hoja = sh_maestro.add_worksheet(title=nombre_limpio, rows="100", cols="20")
                             nueva_hoja.append_row(ENCABEZADOS)
                             formatear_encabezado_hoja(nueva_hoja)
                             
-                            st.success(f"¡Se agregó **{nombre_limpio}** a la lista del personal, se creó su pestaña y su carpeta en Drive!")
+                            st.success(f"¡Se agregó **{nombre_limpio}** a la lista del personal, se creó su pestaña maestro y su carpeta + Excel en Drive!")
                             st.rerun()
                     else:
                         st.warning("Escribe un nombre válido.")

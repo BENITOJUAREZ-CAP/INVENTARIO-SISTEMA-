@@ -74,50 +74,36 @@ def formatear_encabezado_hoja(worksheet):
 
 def obtener_o_crear_carpeta_y_excel(nombre_servidor, parent_folder_id):
     """
-    Crea/Obtiene la carpeta personal en Drive y asegura
-    que dentro exista un archivo de Excel individual inicializado.
+    Obtiene o crea la carpeta personal en Drive. Captura errores de cuota (storageQuotaExceeded)
+    para evitar que la aplicación colapse si la Service Account supera su espacio predeterminado.
     """
-    # 1. Buscar o crear carpeta personal
-    query_folder = f"'{parent_folder_id}' in parents and name = '{nombre_servidor}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-    results_folder = drive_service.files().list(q=query_folder, fields="files(id, name, webViewLink)").execute()
-    items_folder = results_folder.get('files', [])
-    
-    if items_folder:
-        folder_id = items_folder[0]['id']
-        folder_link = items_folder[0]['webViewLink']
-    else:
-        folder_metadata = {
-            'name': nombre_servidor,
-            'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [parent_folder_id]
-        }
-        folder = drive_service.files().create(body=folder_metadata, fields='id, webViewLink').execute()
-        folder_id = folder.get('id')
-        folder_link = folder.get('webViewLink')
+    folder_id = parent_folder_id
+    folder_link = f"https://drive.google.com/drive/folders/{parent_folder_id}"
 
-    # 2. Buscar o crear archivo de Google Sheet dentro de esa carpeta personal
-    nombre_excel_personal = f"INVENTARIO_{nombre_servidor}"
-    query_sheet = f"'{folder_id}' in parents and name = '{nombre_excel_personal}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false"
-    results_sheet = drive_service.files().list(q=query_sheet, fields="files(id, name)").execute()
-    items_sheet = results_sheet.get('files', [])
+    try:
+        # 1. Buscar o crear carpeta personal
+        query_folder = f"'{parent_folder_id}' in parents and name = '{nombre_servidor}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        results_folder = drive_service.files().list(q=query_folder, fields="files(id, name, webViewLink)").execute()
+        items_folder = results_folder.get('files', [])
+        
+        if items_folder:
+            folder_id = items_folder[0]['id']
+            folder_link = items_folder[0]['webViewLink']
+        else:
+            folder_metadata = {
+                'name': nombre_servidor,
+                'mimeType': 'application/vnd.google-apps.folder',
+                'parents': [parent_folder_id]
+            }
+            folder = drive_service.files().create(body=folder_metadata, fields='id, webViewLink').execute()
+            folder_id = folder.get('id')
+            folder_link = folder.get('webViewLink')
 
-    if not items_sheet:
-        sheet_metadata = {
-            'name': nombre_excel_personal,
-            'mimeType': 'application/vnd.google-apps.spreadsheet',
-            'parents': [folder_id]
-        }
-        created_sheet = drive_service.files().create(body=sheet_metadata, fields='id').execute()
-        excel_personal_id = created_sheet.get('id')
-
-        # Inicializar encabezados y formato en el nuevo Excel personal de la carpeta
-        try:
-            sh_personal = gc.open_by_key(excel_personal_id)
-            ws_personal = sh_personal.sheet1
-            ws_personal.append_row(ENCABEZADOS)
-            formatear_encabezado_hoja(ws_personal)
-        except Exception as e_sheet:
-            st.error(f"Advertencia al inicializar el Excel personal: {e_sheet}")
+    except Exception as e:
+        if "storageQuotaExceeded" in str(e):
+            st.warning("⚠️ Nota: La cuota de archivos individuales en Drive de la Service Account está llena. La información se guardará únicamente dentro del Libro Maestro.")
+        else:
+            st.warning(f"Aviso en Google Drive: {e}")
 
     return folder_id, folder_link
 
@@ -276,10 +262,13 @@ if gc and drive_service:
                                     fecha_actual = datetime.now().strftime("%m/%d/%y %H:%M")
                                     
                                     if archivo_subido is not None:
-                                        nombre_archivo = f"{folios_limpios[0]}_{archivo_subido.name}"
-                                        file_metadata = {'name': nombre_archivo, 'parents': [folder_id]}
-                                        media = MediaIoBaseUpload(io.BytesIO(archivo_subido.read()), mimetype=archivo_subido.type, resumable=True)
-                                        drive_service.files().create(body=file_metadata, media_body=media, fields='webViewLink').execute()
+                                        try:
+                                            nombre_archivo = f"{folios_limpios[0]}_{archivo_subido.name}"
+                                            file_metadata = {'name': nombre_archivo, 'parents': [folder_id]}
+                                            media = MediaIoBaseUpload(io.BytesIO(archivo_subido.read()), mimetype=archivo_subido.type, resumable=True)
+                                            drive_service.files().create(body=file_metadata, media_body=media, fields='webViewLink').execute()
+                                        except Exception as e_upload:
+                                            st.warning(f"No se pudo guardar el archivo adjunto en Drive debido a limitaciones de espacio: {e_upload}")
 
                                     for folio in folios_limpios:
                                         val_folio_maletin = folio if (es_maletin or tipo_prod == "MALETIN") else folio_maletin_input
@@ -341,16 +330,13 @@ if gc and drive_service:
                                     ws_indice = sh_maestro.add_worksheet(title="PERSONAL DE SALUD", rows="100", cols="5")
                                     ws_indice.append_row(["PERSONAL DE SALUD"])
                                 
-                                # Encontrar la primera fila realmente vacía en la Columna A
                                 col_a_values = ws_indice.col_values(1)
                                 primera_fila_vacia = len(col_a_values) + 1
-                                
-                                # Insertar en la posición consecutiva exacta
                                 ws_indice.update_cell(primera_fila_vacia, 1, nombre_limpio)
                             except Exception as e_ind:
                                 st.error(f"Error al escribir en la lista general: {e_ind}")
 
-                            # 2. Crear carpeta personal en Google Drive Y su Excel interno
+                            # 2. Crear/Obtener carpeta personal en Google Drive
                             folder_id, folder_link = obtener_o_crear_carpeta_y_excel(nombre_limpio, CARPETA_PERSONAL_ID)
                             
                             # 3. Crear nueva pestaña individual dentro del Libro Maestro
@@ -358,7 +344,7 @@ if gc and drive_service:
                             nueva_hoja.append_row(ENCABEZADOS)
                             formatear_encabezado_hoja(nueva_hoja)
                             
-                            st.success(f"¡Se agregó **{nombre_limpio}** a la lista del personal, se creó su pestaña maestro y su carpeta + Excel en Drive!")
+                            st.success(f"¡Se agregó **{nombre_limpio}** a la lista del personal y se creó su pestaña maestro!")
                             st.rerun()
                     else:
                         st.warning("Escribe un nombre válido.")

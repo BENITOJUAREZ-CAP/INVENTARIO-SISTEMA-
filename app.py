@@ -24,7 +24,7 @@ SCOPE = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-# Encabezados exactos según la imagen de A hasta P
+# Encabezados exactos de Columna A a Columna P
 ENCABEZADOS = [
     "Folio de producto", "Clave de Producto", "Producto", "Tipo", "Uso",
     "Planillas", "Fecha", "No. de Serie", "Caja", "Estatus",
@@ -84,16 +84,33 @@ if gc and drive_service:
         else:
             ws_inventario = hojas[0]
 
-        data_raw = ws_inventario.get_all_records()
-        if data_raw:
-            df_general = pd.DataFrame(data_raw).astype(str)
+        # Lectura segura de datos (convierte todo a texto para evitar errores PyArrow)
+        valores_raw = ws_inventario.get_all_values()
+        
+        if len(valores_raw) > 1:
+            encabezados_hoja = [str(col).strip() for col in valores_raw[0]]
+            filas_datos = valores_raw[1:]
+            df_general = pd.DataFrame(filas_datos, columns=encabezados_hoja).astype(str)
         else:
             df_general = pd.DataFrame(columns=ENCABEZADOS)
 
-        col_servidor_nombre = "Servidor de la Salud"
-        if col_servidor_nombre in df_general.columns:
-            lista_servidores = sorted(list(set(df_general[col_servidor_nombre].dropna().unique())))
-            lista_servidores = [s.strip() for s in lista_servidores if s.strip() and s.strip().upper() != "SERVIDOR DE LA SALUD"]
+        # Normalizar nombres de columnas a mayúsculas sin espacios
+        columnas_normalizadas = {col: col.strip().upper() for col in df_general.columns}
+        df_general.rename(columns=columnas_normalizadas, inplace=True)
+
+        # Buscar la columna del Servidor de la Salud de forma flexible
+        col_servidor = None
+        for col in df_general.columns:
+            if "SERVIDOR" in col and "SALUD" in col:
+                col_servidor = col
+                break
+
+        if col_servidor:
+            lista_servidores = sorted(list(set(df_general[col_servidor].str.strip().unique())))
+            lista_servidores = [
+                s for s in lista_servidores 
+                if s and s.upper() not in ["NONE", "NAN", "", "SERVIDOR DE LA SALUD"]
+            ]
         else:
             lista_servidores = []
 
@@ -104,9 +121,10 @@ if gc and drive_service:
             valores_productos = ws_productos.get_all_values()
             lista_productos = [fila[0].strip() for fila in valores_productos if fila and fila[0].strip()]
             lista_productos = [p for p in lista_productos if p.upper() not in ["PRODUCTO", "PRODUCTOS", "CONCEPTO"]]
-        except Exception as e:
-            st.warning("No se pudo cargar la pestaña 'PRODUCTOS'.")
+        except Exception:
+            pass
 
+        # --- PESTAÑAS DE LA APLICACIÓN ---
         tab_consultar, tab_agregar_persona = st.tabs([
             "🔍 Consultar y Asignar Productos", 
             "➕ Agregar Nuevo Servidor de la Salud"
@@ -120,8 +138,9 @@ if gc and drive_service:
                     options=lista_servidores
                 )
                 
-                if col_servidor_nombre in df_general.columns:
-                    df_filtrado = df_general[df_general[col_servidor_nombre].str.strip() == servidor_seleccionado]
+                # Filtrar registros del servidor seleccionado
+                if col_servidor:
+                    df_filtrado = df_general[df_general[col_servidor].str.strip() == servidor_seleccionado]
                 else:
                     df_filtrado = pd.DataFrame(columns=ENCABEZADOS)
                 
@@ -158,14 +177,10 @@ if gc and drive_service:
                     with st.form("form_confirmar_producto", clear_on_submit=True):
                         st.write(f"### Capturar datos de: {producto_seleccionado}")
                         
-                        # Selección de Cantidad primero fuera para definir dinámica
                         cantidad = st.number_input("Cantidad de este producto a registrar:", min_value=1, value=1, step=1)
                         
-                        # Generación dinámica de campos para los Folios de producto
                         st.markdown("#### 🏷️ Folios de Producto")
                         folios_ingresados = []
-                        
-                        # Crear columnas para distribuir visualmente los campos si hay varios folios
                         cols_folios = st.columns(min(cantidad, 4))
                         for i in range(cantidad):
                             col_idx = i % 4
@@ -187,7 +202,7 @@ if gc and drive_service:
                             estatus = st.selectbox("Estatus:", ["EN ALMACEN", "EN TRANSITO", "ENTREGADO"])
                         with c3:
                             if es_maletin or tipo_prod == "MALETIN":
-                                st.info("ℹ️ Al ser un Maletín, el **Folio del Maletín** (Columna K) tomará automáticamente el **Folio del Producto**.")
+                                st.info("ℹ️ Al ser un Maletín, el **Folio del Maletín** (Columna K) tomará el **Folio del Producto**.")
                                 folio_maletin = ""
                             else:
                                 folio_maletin = st.text_input("Folio del Maletín al que pertenece (Columna K):")
@@ -201,25 +216,20 @@ if gc and drive_service:
                         btn_guardar = st.form_submit_button("💾 Guardar en Inventario")
                         
                         if btn_guardar:
-                            # Verificar que todos los folios estén completos
                             folios_limpios = [f.strip() for f in folios_ingresados if f.strip()]
                             if len(folios_limpios) == cantidad:
                                 fecha_actual = datetime.now().strftime("%m/%d/%y %H:%M")
                                 
-                                # Guardar comprobante en Drive si existe
+                                # Subir comprobante a Google Drive
                                 if archivo_subido is not None:
                                     nombre_archivo = f"{folios_limpios[0]}_{archivo_subido.name}"
                                     file_metadata = {'name': nombre_archivo, 'parents': [folder_id]}
                                     media = MediaIoBaseUpload(io.BytesIO(archivo_subido.read()), mimetype=archivo_subido.type, resumable=True)
                                     drive_service.files().create(body=file_metadata, media_body=media, fields='webViewLink').execute()
 
-                                # Insertar una fila independiente por cada folio ingresado
-                                filas_a_agregar = []
+                                # Agregar una fila por cada folio ingresado
                                 for folio in folios_limpios:
-                                    if es_maletin or tipo_prod == "MALETIN":
-                                        val_folio_maletin = folio
-                                    else:
-                                        val_folio_maletin = folio_maletin.strip()
+                                    val_folio_maletin = folio if (es_maletin or tipo_prod == "MALETIN") else folio_maletin.strip()
 
                                     nueva_fila = [
                                         str(folio),                 # A: Folio de producto
@@ -235,22 +245,18 @@ if gc and drive_service:
                                         str(val_folio_maletin),     # K: Folio del Maletín
                                         str(entidad_envio),         # L: Entidad de Envío
                                         str(registrado_por),        # M: Registrado Por
-                                        "1",                        # N: Cantidad (1 por folio/unidad)
+                                        "1",                        # N: Cantidad
                                         str(servidor_seleccionado), # O: Servidor de la Salud
                                         str(observaciones)          # P: Observaciones
                                     ]
-                                    filas_a_agregar.append(nueva_fila)
-                                
-                                # Guardar todas las filas en Google Sheets
-                                for fila in filas_a_agregar:
-                                    ws_inventario.append_row(fila)
+                                    ws_inventario.append_row(nueva_fila)
 
-                                st.success(f"¡Se registraron exitosamente {len(filas_a_agregar)} unidad(es) de **{producto_seleccionado}** para **{servidor_seleccionado}**!")
+                                st.success(f"¡Se registraron exitosamente {len(folios_limpios)} unidad(es) de **{producto_seleccionado}**!")
                                 st.rerun()
                             else:
-                                st.warning(f"Por favor ingresa los {cantidad} folios requeridos (completaste {len(folios_limpios)} de {cantidad}).")
+                                st.warning(f"Ingresa los {cantidad} folios requeridos (llevas {len(folios_limpios)} de {cantidad}).")
             else:
-                st.info("No hay Servidores de la Salud con registros. Puedes registrar uno en la siguiente pestaña.")
+                st.info("No se encontraron registros de Servidores de la Salud en la hoja. Agrega uno nuevo en la siguiente pestaña.")
 
         # === PESTAÑA 2: AGREGAR NUEVO SERVIDOR DE LA SALUD ===
         with tab_agregar_persona:
@@ -265,12 +271,24 @@ if gc and drive_service:
                         if nombre_limpio in [s.upper() for s in lista_servidores]:
                             st.warning("Este Servidor ya existe en la lista.")
                         else:
+                            # Crear carpeta en Google Drive
                             folder_id, folder_link = obtener_o_crear_carpeta(nombre_limpio, CARPETA_PERSONAL_ID)
-                            st.success(f"¡Servidor **{nombre_limpio}** preparado correctamente! Ya puedes seleccionarlo en la lista para registrar sus productos.")
+                            
+                            # Insertar un registro inicial básico en Google Sheets para que aparezca en el selectbox
+                            fecha_actual = datetime.now().strftime("%m/%d/%y %H:%M")
+                            fila_inicial = [
+                                "N/A", "N/A", "REGISTRO INICIAL", "SISTEMA", "N/A",
+                                "0", fecha_actual, "N/A", "N/A", "ALTA",
+                                "N/A", "CIUDAD DE MEXICO", "SISTEMA", "0",
+                                nombre_limpio, "Registro de Servidor"
+                            ]
+                            ws_inventario.append_row(fila_inicial)
+                            
+                            st.success(f"¡Servidor **{nombre_limpio}** registrado con éxito!")
                             st.rerun()
                     else:
                         st.warning("Escribe un nombre válido.")
 
     except Exception as e:
-        st.error("Error al procesar la solicitud:")
+        st.error("Error al procesar los datos de la hoja:")
         st.exception(e)

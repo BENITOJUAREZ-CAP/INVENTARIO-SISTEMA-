@@ -73,12 +73,30 @@ if gc and drive_service:
     try:
         sh_maestro = gc.open_by_key(EXCEL_MAESTRO_ID)
         
-        # --- OBTENER LISTA DE SERVIDORES ---
+        # --- OBTENER HOJA PRINCIPAL DE DATOS ---
         hojas = sh_maestro.worksheets()
-        todas_las_hojas = [hoja.title for hoja in hojas]
-        hojas_reservadas = ["PRODUCTOS", "PERSONAL DE SALUDA", "PERSONAL DE SALUD", "Hoja 1"]
-        lista_servidores = [h for h in todas_las_hojas if h not in hojas_reservadas]
+        nombres_hojas = [h.title for h in hojas]
         
+        if "PERSONAL DE SALUD" in nombres_hojas:
+            ws_inventario = sh_maestro.worksheet("PERSONAL DE SALUD")
+        elif "Hoja 1" in nombres_hojas:
+            ws_inventario = sh_maestro.worksheet("Hoja 1")
+        else:
+            ws_inventario = hojas[0]
+
+        data_raw = ws_inventario.get_all_records()
+        if data_raw:
+            df_general = pd.DataFrame(data_raw).astype(str)
+        else:
+            df_general = pd.DataFrame(columns=ENCABEZADOS)
+
+        col_servidor_nombre = "Servidor de la Salud"
+        if col_servidor_nombre in df_general.columns:
+            lista_servidores = sorted(list(set(df_general[col_servidor_nombre].dropna().unique())))
+            lista_servidores = [s.strip() for s in lista_servidores if s.strip() and s.strip().upper() != "SERVIDOR DE LA SALUD"]
+        else:
+            lista_servidores = []
+
         # --- OBTENER CATÁLOGO DESDE LA PESTAÑA "PRODUCTOS" ---
         lista_productos = []
         try:
@@ -89,11 +107,9 @@ if gc and drive_service:
         except Exception as e:
             st.warning("No se pudo cargar la pestaña 'PRODUCTOS'.")
 
-        # --- PESTAÑAS DE LA APLICACIÓN ---
-        tab_consultar, tab_agregar_persona, tab_eliminar_persona = st.tabs([
+        tab_consultar, tab_agregar_persona = st.tabs([
             "🔍 Consultar y Asignar Productos", 
-            "➕ Agregar Nuevo Servidor", 
-            "🗑️ Eliminar Servidor"
+            "➕ Agregar Nuevo Servidor de la Salud"
         ])
         
         # === PESTAÑA 1: CONSULTA Y ASIGNACIÓN ===
@@ -104,17 +120,12 @@ if gc and drive_service:
                     options=lista_servidores
                 )
                 
-                # Cargar o crear la hoja del servidor seleccionado
-                try:
-                    worksheet_servidor = sh_maestro.worksheet(servidor_seleccionado)
-                except:
-                    worksheet_servidor = sh_maestro.add_worksheet(title=servidor_seleccionado, rows="100", cols="20")
-                    worksheet_servidor.append_row(ENCABEZADOS)
-
-                data_servidor = worksheet_servidor.get_all_records()
-                df_filtrado = pd.DataFrame(data_servidor)
+                if col_servidor_nombre in df_general.columns:
+                    df_filtrado = df_general[df_general[col_servidor_nombre].str.strip() == servidor_seleccionado]
+                else:
+                    df_filtrado = pd.DataFrame(columns=ENCABEZADOS)
                 
-                st.write(f"### Inventario actual de: **{servidor_seleccionado}**")
+                st.write(f"### Inventario actual registrado para: **{servidor_seleccionado}**")
                 st.dataframe(df_filtrado, use_container_width=True)
                 
                 folder_id, folder_link = obtener_o_crear_carpeta(servidor_seleccionado, CARPETA_PERSONAL_ID)
@@ -142,6 +153,9 @@ if gc and drive_service:
                 )
                 
                 if tiene_producto == "Sí":
+                    # Detectar si el producto a capturar es de tipo Maletín
+                    es_maletin = "MALETIN" in producto_seleccionado.upper()
+                    
                     with st.form("form_confirmar_producto", clear_on_submit=True):
                         st.write(f"### Capturar datos de: {producto_seleccionado}")
                         
@@ -149,7 +163,8 @@ if gc and drive_service:
                         with c1:
                             folio_producto = st.text_input("Folio de producto:")
                             clave_producto = st.text_input("Clave de Producto:")
-                            tipo_prod = st.selectbox("Tipo:", ["EQUIPO", "DESECHABLE", "MALETIN", "OTRO"])
+                            tipo_defecto = "MALETIN" if es_maletin else "EQUIPO"
+                            tipo_prod = st.selectbox("Tipo:", ["EQUIPO", "DESECHABLE", "MALETIN", "OTRO"], index=2 if es_maletin else 0)
                             uso_prod = st.selectbox("Uso:", ["ENFERMERA", "DERECHOHABIENTE", "GENERAL"])
                         with c2:
                             planillas = st.number_input("Planillas:", min_value=1, value=1000, step=100)
@@ -157,7 +172,12 @@ if gc and drive_service:
                             caja = st.text_input("Caja (Opcional):")
                             estatus = st.selectbox("Estatus:", ["EN ALMACEN", "EN TRANSITO", "ENTREGADO"])
                         with c3:
-                            folio_maletin = st.text_input("Folio del Maletín:")
+                            if es_maletin or tipo_prod == "MALETIN":
+                                st.info("ℹ️ Al ser un Maletín, el **Folio del Maletín** (Columna K) se asignará igual al **Folio de producto**.")
+                                folio_maletin = ""  # Se asignará automáticamante al folio_producto
+                            else:
+                                folio_maletin = st.text_input("Folio del Maletín al que pertenece (Columna K):")
+                                
                             entidad_envio = st.text_input("Entidad de Envío:", value="CIUDAD DE MEXICO")
                             registrado_por = st.text_input("Registrado Por:", value="INVENTARIO DE SALUD 20")
                             cantidad = st.number_input("Cantidad:", min_value=1, value=1, step=1)
@@ -171,6 +191,12 @@ if gc and drive_service:
                             if folio_producto.strip():
                                 fecha_actual = datetime.now().strftime("%m/%d/%y %H:%M")
                                 
+                                # Si el producto es un maletín, la Columna K toma el mismo valor que el Folio de producto
+                                if es_maletin or tipo_prod == "MALETIN":
+                                    val_folio_maletin = folio_producto.strip()
+                                else:
+                                    val_folio_maletin = folio_maletin.strip()
+
                                 # Guardar comprobante en Drive si existe
                                 if archivo_subido is not None:
                                     file_metadata = {'name': f"{folio_producto}_{archivo_subido.name}", 'parents': [folder_id]}
@@ -179,73 +205,50 @@ if gc and drive_service:
 
                                 # Fila ordenada exactamente de Columna A a P
                                 nueva_fila = [
-                                    folio_producto,        # A: Folio de producto
-                                    clave_producto,        # B: Clave de Producto
-                                    producto_seleccionado, # C: Producto
-                                    tipo_prod,             # D: Tipo
-                                    uso_prod,              # E: Uso
-                                    planillas,             # F: Planillas
-                                    fecha_actual,          # G: Fecha
-                                    no_serie,              # H: No. de Serie
-                                    caja,                  # I: Caja
-                                    estatus,               # J: Estatus
-                                    folio_maletin,         # K: Folio del Maletín
-                                    entidad_envio,         # L: Entidad de Envío
-                                    registrado_por,        # M: Registrado Por
-                                    cantidad,              # N: Cantidad
-                                    servidor_seleccionado, # O: Servidor de la Salud
-                                    observaciones          # P: Observaciones
+                                    str(folio_producto),        # A: Folio de producto
+                                    str(clave_producto),        # B: Clave de Producto
+                                    str(producto_seleccionado), # C: Producto
+                                    str(tipo_prod),             # D: Tipo
+                                    str(uso_prod),              # E: Uso
+                                    str(planillas),             # F: Planillas
+                                    str(fecha_actual),          # G: Fecha
+                                    str(no_serie),              # H: No. de Serie
+                                    str(caja),                  # I: Caja
+                                    str(estatus),               # J: Estatus
+                                    str(val_folio_maletin),     # K: Folio del Maletín
+                                    str(entidad_envio),         # L: Entidad de Envío
+                                    str(registrado_por),        # M: Registrado Por
+                                    str(cantidad),              # N: Cantidad
+                                    str(servidor_seleccionado), # O: Servidor de la Salud
+                                    str(observaciones)          # P: Observaciones
                                 ]
                                 
-                                worksheet_servidor.append_row(nueva_fila)
-                                st.success(f"¡Se agregó **{producto_seleccionado}** (Folio: {folio_producto}) correctamente!")
+                                ws_inventario.append_row(nueva_fila)
+                                st.success(f"¡Se agregó **{producto_seleccionado}** para **{servidor_seleccionado}** correctamente!")
                                 st.rerun()
                             else:
                                 st.warning("Por favor ingresa al menos el Folio de producto.")
             else:
-                st.info("No hay Servidores de la Salud registrados. Agrega uno en la siguiente pestaña.")
+                st.info("No hay Servidores de la Salud con registros. Puedes registrar uno en la siguiente pestaña.")
 
-        # === PESTAÑA 2: AGREGAR NUEVO SERVIDOR ===
+        # === PESTAÑA 2: AGREGAR NUEVO SERVIDOR DE LA SALUD ===
         with tab_agregar_persona:
-            st.subheader("➕ Agregar Nuevo Servidor de la Salud")
+            st.subheader("➕ Registrar Nuevo Servidor de la Salud")
             with st.form("form_nuevo_servidor", clear_on_submit=True):
                 nuevo_nombre = st.text_input("Nombre completo del Servidor de la Salud:")
-                btn_agregar = st.form_submit_button("➕ Registrar Servidor")
+                btn_agregar = st.form_submit_button("➕ Registrar Servidor y Crear Carpeta")
                 
                 if btn_agregar:
-                    if nuevo_nombre.strip():
-                        if nuevo_nombre.strip() in lista_servidores:
-                            st.warning("Este Servidor ya existe.")
+                    nombre_limpio = nuevo_nombre.strip().upper()
+                    if nombre_limpio:
+                        if nombre_limpio in [s.upper() for s in lista_servidores]:
+                            st.warning("Este Servidor ya existe en la lista.")
                         else:
-                            nueva_ws = sh_maestro.add_worksheet(title=nuevo_nombre.strip(), rows="100", cols="20")
-                            nueva_ws.append_row(ENCABEZADOS)
-                            obtener_o_crear_carpeta(nuevo_nombre.strip(), CARPETA_PERSONAL_ID)
-                            st.success(f"¡Servidor **{nuevo_nombre.strip()}** agregado exitosamente!")
+                            folder_id, folder_link = obtener_o_crear_carpeta(nombre_limpio, CARPETA_PERSONAL_ID)
+                            st.success(f"¡Servidor **{nombre_limpio}** preparado correctamente! Ya puedes seleccionarlo en la lista para registrar sus productos.")
                             st.rerun()
                     else:
                         st.warning("Escribe un nombre válido.")
-
-        # === PESTAÑA 3: ELIMINAR SERVIDOR ===
-        with tab_eliminar_persona:
-            st.subheader("🗑️ Eliminar Servidor de la Salud")
-            st.error("⚠️ Esta acción borrará la pestaña y registros vinculados a este Servidor.")
-            
-            if lista_servidores:
-                servidor_a_eliminar = st.selectbox("Selecciona el Servidor a eliminar:", options=lista_servidores, key="select_eliminar")
-                confirmar = st.checkbox(f"Confirmo que deseo borrar a **{servidor_a_eliminar}**")
-                btn_eliminar = st.button("🗑️ Eliminar Definitivamente", type="primary")
-                
-                if btn_eliminar:
-                    if confirmar:
-                        try:
-                            ws_del = sh_maestro.worksheet(servidor_a_eliminar)
-                            sh_maestro.del_worksheet(ws_del)
-                            st.success(f"Se ha eliminado a **{servidor_a_eliminar}**.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al eliminar la hoja: {e}")
-                    else:
-                        st.warning("Marca la casilla de confirmación para proceder.")
 
     except Exception as e:
         st.error("Error al procesar la solicitud:")

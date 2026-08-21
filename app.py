@@ -76,8 +76,11 @@ if gc and drive_service:
         hojas_objetos = sh_maestro.worksheets()
         nombres_hojas = [h.title for h in hojas_objetos]
         
-        # Filtrar hojas que pertenecen a Servidores (excluyendo hojas del sistema)
-        hojas_reservadas = ["PRODUCTOS", "PERSONAL DE SALUD", "HOJA 1", "PLANTILLA"]
+        # Pestañas principales reservadas
+        HOJA_INDICE_NOMBRE = "PERSONAL DE SALUD"
+        hojas_reservadas = [HOJA_INDICE_NOMBRE.upper(), "PRODUCTOS", "HOJA 1", "PLANTILLA"]
+        
+        # Obtener servidores de las pestañas individuales
         lista_servidores = [
             h for h in nombres_hojas 
             if h.strip().upper() not in hojas_reservadas
@@ -109,7 +112,6 @@ if gc and drive_service:
                     options=sorted(lista_servidores)
                 )
                 
-                # Obtener la hoja individual del servidor seleccionado
                 ws_servidor = sh_maestro.worksheet(servidor_seleccionado)
                 valores_raw = ws_servidor.get_all_values()
                 
@@ -147,7 +149,6 @@ if gc and drive_service:
 
                 if folio_maletin_input:
                     st.success(f"✅ Configuración lista: **{maletin_num_seleccionado}** con Folio **{folio_maletin_input}** para **{servidor_seleccionado}**")
-                    
                     st.subheader("📦 Selección e Integración del Producto")
                     
                     if lista_productos:
@@ -211,31 +212,19 @@ if gc and drive_service:
                                         media = MediaIoBaseUpload(io.BytesIO(archivo_subido.read()), mimetype=archivo_subido.type, resumable=True)
                                         drive_service.files().create(body=file_metadata, media_body=media, fields='webViewLink').execute()
 
-                                    # Agregar a la pestaña personal del Servidor
                                     for folio in folios_limpios:
                                         val_folio_maletin = folio if (es_maletin or tipo_prod == "MALETIN") else folio_maletin_input
 
                                         nueva_fila = [
-                                            str(folio),                 # A: Folio de producto
-                                            str(clave_producto),        # B: Clave de Producto
-                                            str(producto_seleccionado), # C: Producto
-                                            str(tipo_prod),             # D: Tipo
-                                            str(uso_prod),              # E: Uso
-                                            str(planillas),             # F: Planillas
-                                            str(fecha_actual),          # G: Fecha
-                                            str(no_serie),              # H: No. de Serie
-                                            str(caja),                  # I: Caja
-                                            str(estatus),               # J: Estatus
-                                            str(val_folio_maletin),     # K: Folio del Maletín
-                                            str(entidad_envio),         # L: Entidad de Envío
-                                            str(registrado_por),        # M: Registrado Por
-                                            "1",                        # N: Cantidad
-                                            str(servidor_seleccionado), # O: Servidor de la Salud
-                                            str(observaciones)          # P: Observaciones
+                                            str(folio), str(clave_producto), str(producto_seleccionado), 
+                                            str(tipo_prod), str(uso_prod), str(planillas), str(fecha_actual), 
+                                            str(no_serie), str(caja), str(estatus), str(val_folio_maletin), 
+                                            str(entidad_envio), str(registrado_por), "1", 
+                                            str(servidor_seleccionado), str(observaciones)
                                         ]
                                         ws_servidor.append_row(nueva_fila)
 
-                                    st.success(f"¡Se guardaron {len(folios_limpios)} registro(s) directamente en la pestaña de **{servidor_seleccionado}**!")
+                                    st.success(f"¡Se guardaron {len(folios_limpios)} registro(s) en la pestaña de **{servidor_seleccionado}**!")
                                     st.rerun()
                                 else:
                                     st.warning(f"Ingresa los {cantidad} folios requeridos (llevas {len(folios_limpios)} de {cantidad}).")
@@ -243,31 +232,38 @@ if gc and drive_service:
                     st.info("👈 Ingresa el **Folio/Clave del Maletín** en el paso 3 para desbloquear los productos.")
 
             else:
-                st.info("No se encontraron pestañas de Servidores de la Salud. Registra uno en la pestaña contigua.")
+                st.info("No se encontraron pestañas de Servidores de la Salud.")
 
         # === PESTAÑA 2: AGREGAR NUEVO SERVIDOR DE LA SALUD ===
         with tab_agregar_persona:
-            st.subheader("➕ Crear Pestaña y Carpeta para Nuevo Servidor")
+            st.subheader("➕ Crear Pestaña y Registrar Servidor")
             with st.form("form_nuevo_servidor", clear_on_submit=True):
                 nuevo_nombre = st.text_input("Nombre completo del Servidor de la Salud:")
-                btn_agregar = st.form_submit_button("➕ Crear Hoja Individual y Carpeta")
+                btn_agregar = st.form_submit_button("➕ Registrar y Crear Hoja")
                 
                 if btn_agregar:
                     nombre_limpio = nuevo_nombre.strip().upper()
                     if nombre_limpio:
                         if nombre_limpio in [n.upper() for n in nombres_hojas]:
-                            st.warning("Ya existe una pestaña con este nombre en el archivo Excel.")
+                            st.warning("Ya existe un Servidor con este nombre.")
                         else:
-                            # 1. Crear carpeta en Google Drive
+                            # 1. Agregar el nombre en la lista de la pestaña "PERSONAL DE SALUD"
+                            try:
+                                ws_indice = sh_maestro.worksheet("PERSONAL DE SALUD")
+                                ws_indice.append_row([nombre_limpio])
+                            except Exception:
+                                pass # Si la pestaña no existe por alguna razón, continúa
+
+                            # 2. Crear su carpeta en Google Drive
                             folder_id, folder_link = obtener_o_crear_carpeta(nombre_limpio, CARPETA_PERSONAL_ID)
                             
-                            # 2. Crear una NUEVA PESTAÑA/HOJA específica para esta persona
+                            # 3. Crear su NUEVA PESTAÑA individual
                             nueva_hoja = sh_maestro.add_worksheet(title=nombre_limpio, rows="100", cols="20")
                             
-                            # 3. Insertar los encabezados estándar en la fila 1
+                            # 4. Insertar la fila de encabezados estándar
                             nueva_hoja.append_row(ENCABEZADOS)
                             
-                            st.success(f"¡Se ha creado la pestaña **{nombre_limpio}** en el Excel Maestro y su carpeta en Drive!")
+                            st.success(f"¡Se agregó **{nombre_limpio}** a 'PERSONAL DE SALUD', se creó su pestaña y su carpeta en Drive!")
                             st.rerun()
                     else:
                         st.warning("Escribe un nombre válido.")
@@ -275,30 +271,41 @@ if gc and drive_service:
         # === PESTAÑA 3: ELIMINAR SERVIDOR DE LA SALUD ===
         with tab_eliminar_persona:
             st.subheader("❌ Eliminar Servidor de la Salud del Sistema")
-            st.warning("⚠️ **Atención:** Esta acción eliminará permanentemente la pestaña del Servidor de la Salud seleccionada en el archivo de Google Sheets.")
+            st.warning("⚠️ **Atención:** Esto borrará su nombre de 'PERSONAL DE SALUD' y eliminará su pestaña del Excel.")
             
             if lista_servidores:
                 servidor_a_eliminar = st.selectbox(
-                    "Selecciona el Servidor de la Salud a eliminar:",
+                    "Selecciona el Servidor a eliminar:",
                     options=sorted(lista_servidores),
                     key="select_eliminar_servidor"
                 )
                 
                 confirmacion = st.checkbox(
-                    f"Confirmo que deseo eliminar la pestaña **{servidor_a_eliminar}** y todo su contenido.",
+                    f"Confirmo que deseo eliminar a **{servidor_a_eliminar}**.",
                     key="chk_confirmar_eliminar"
                 )
                 
                 if st.button("🗑️ Eliminar Definitivamente", type="primary", disabled=not confirmacion):
                     try:
+                        # 1. Eliminar de la hoja índice "PERSONAL DE SALUD" si existe ahí
+                        try:
+                            ws_indice = sh_maestro.worksheet("PERSONAL DE SALUD")
+                            celda = ws_indice.find(servidor_a_eliminar)
+                            if celda:
+                                ws_indice.delete_rows(celda.row)
+                        except Exception:
+                            pass
+
+                        # 2. Eliminar su pestaña individual
                         hoja_borrar = sh_maestro.worksheet(servidor_a_eliminar)
                         sh_maestro.del_worksheet(hoja_borrar)
-                        st.success(f"¡La pestaña de **{servidor_a_eliminar}** ha sido eliminada correctamente del archivo!")
+                        
+                        st.success(f"¡**{servidor_a_eliminar}** eliminado con éxito del registro y de las pestañas!")
                         st.rerun()
                     except Exception as err:
-                        st.error(f"Error al intentar eliminar la pestaña: {err}")
+                        st.error(f"Error al eliminar: {err}")
             else:
-                st.info("No hay Servidores de la Salud registrados para eliminar.")
+                st.info("No hay Servidores registrados para eliminar.")
 
     except Exception as e:
         st.error("Error al procesar el libro de Google Sheets:")

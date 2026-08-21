@@ -84,7 +84,7 @@ if gc and drive_service:
         else:
             ws_inventario = hojas[0]
 
-        # Lectura segura de datos (convierte todo a texto para evitar errores PyArrow)
+        # Lectura segura de datos
         valores_raw = ws_inventario.get_all_values()
         
         if len(valores_raw) > 1:
@@ -151,110 +151,114 @@ if gc and drive_service:
                 st.markdown(f"📂 **Carpeta en Google Drive:** [Abrir carpeta personal de {servidor_seleccionado}]({folder_link})")
                 
                 st.divider()
-                st.subheader("📋 Verificación y Asignación de Productos")
+                st.subheader("📋 Asignación de Productos por Folio de Maletín")
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    maletin_seleccionado = st.selectbox(
-                        "Selecciona el Maletín a registrar/revisar:", 
-                        ["Maletín 1", "Maletín 2", "Maletín 3", "Maletín 4"]
-                    )
-                with col2:
-                    if lista_productos:
-                        producto_seleccionado = st.selectbox("Selecciona un producto del catálogo:", options=lista_productos)
-                    else:
-                        producto_seleccionado = st.text_input("Nombre del producto:")
-                
-                tiene_producto = st.radio(
-                    f"¿El **{maletin_seleccionado}** de **{servidor_seleccionado}** contiene el producto **'{producto_seleccionado}'**?",
-                    ["Sí", "No"],
-                    horizontal=True
-                )
-                
-                if tiene_producto == "Sí":
-                    es_maletin = "MALETIN" in producto_seleccionado.upper()
+                # Paso 1: Pedir primero el Folio del Maletín
+                folio_maletin_input = st.text_input(
+                    "1️⃣ Ingresa el Folio del Maletín (Columna K):",
+                    placeholder="Ej. MAL-2024-001"
+                ).strip()
+
+                if folio_maletin_input:
+                    st.success(f"✅ Folio de Maletín activo: **{folio_maletin_input}**")
                     
-                    with st.form("form_confirmar_producto", clear_on_submit=True):
-                        st.write(f"### Capturar datos de: {producto_seleccionado}")
+                    # Paso 2: Desplegar selector de productos del catálogo
+                    st.markdown("#### 2️⃣ Selección e Integración del Producto")
+                    
+                    if lista_productos:
+                        producto_seleccionado = st.selectbox(
+                            "Selecciona un producto del catálogo:", 
+                            options=lista_productos
+                        )
+                    else:
+                        producto_seleccionado = st.text_input("Nombre del producto del catálogo:")
+                    
+                    if producto_seleccionado:
+                        es_maletin = "MALETIN" in producto_seleccionado.upper()
                         
-                        cantidad = st.number_input("Cantidad de este producto a registrar:", min_value=1, value=1, step=1)
-                        
-                        st.markdown("#### 🏷️ Folios de Producto")
-                        folios_ingresados = []
-                        cols_folios = st.columns(min(cantidad, 4))
-                        for i in range(cantidad):
-                            col_idx = i % 4
-                            with cols_folios[col_idx]:
-                                f_val = st.text_input(f"Folio de producto #{i+1}:", key=f"folio_prod_{i}")
-                                folios_ingresados.append(f_val)
-                        
-                        st.divider()
-                        
-                        c1, c2, c3 = st.columns(3)
-                        with c1:
-                            clave_producto = st.text_input("Clave de Producto:")
-                            tipo_prod = st.selectbox("Tipo:", ["EQUIPO", "DESECHABLE", "MALETIN", "OTRO"], index=2 if es_maletin else 0)
-                            uso_prod = st.selectbox("Uso:", ["ENFERMERA", "DERECHOHABIENTE", "GENERAL"])
-                        with c2:
-                            planillas = st.number_input("Planillas:", min_value=1, value=1000, step=100)
-                            no_serie = st.text_input("No. de Serie (Opcional):")
-                            caja = st.text_input("Caja (Opcional):")
-                            estatus = st.selectbox("Estatus:", ["EN ALMACEN", "EN TRANSITO", "ENTREGADO"])
-                        with c3:
-                            if es_maletin or tipo_prod == "MALETIN":
-                                st.info("ℹ️ Al ser un Maletín, el **Folio del Maletín** (Columna K) tomará el **Folio del Producto**.")
-                                folio_maletin = ""
-                            else:
-                                folio_maletin = st.text_input("Folio del Maletín al que pertenece (Columna K):")
-                                
-                            entidad_envio = st.text_input("Entidad de Envío:", value="CIUDAD DE MEXICO")
-                            registrado_por = st.text_input("Registrado Por:", value="INVENTARIO DE SALUD 20")
+                        with st.form("form_confirmar_producto", clear_on_submit=True):
+                            st.write(f"### Capturar datos de: **{producto_seleccionado}**")
+                            
+                            cantidad = st.number_input("Cantidad de este producto a registrar:", min_value=1, value=1, step=1)
+                            
+                            st.markdown("#### 🏷️ Folios de Producto")
+                            folios_ingresados = []
+                            cols_folios = st.columns(min(cantidad, 4))
+                            for i in range(cantidad):
+                                col_idx = i % 4
+                                with cols_folios[col_idx]:
+                                    f_val = st.text_input(f"Folio de producto #{i+1}:", key=f"folio_prod_{i}")
+                                    folios_ingresados.append(f_val)
+                            
+                            st.divider()
+                            
+                            c1, c2, c3 = st.columns(3)
+                            with c1:
+                                clave_producto = st.text_input("Clave de Producto:")
+                                tipo_prod = st.selectbox(
+                                    "Tipo:", 
+                                    ["EQUIPO", "DESECHABLE", "MALETIN", "OTRO"], 
+                                    index=2 if es_maletin else 0
+                                )
+                                uso_prod = st.selectbox("Uso:", ["ENFERMERA", "DERECHOHABIENTE", "GENERAL"])
+                            with c2:
+                                planillas = st.number_input("Planillas:", min_value=1, value=1000, step=100)
+                                no_serie = st.text_input("No. de Serie (Opcional):")
+                                caja = st.text_input("Caja (Opcional):")
+                                estatus = st.selectbox("Estatus:", ["EN ALMACEN", "EN TRANSITO", "ENTREGADO"])
+                            with c3:
+                                entidad_envio = st.text_input("Entidad de Envío:", value="CIUDAD DE MEXICO")
+                                registrado_por = st.text_input("Registrado Por:", value="INVENTARIO DE SALUD 20")
 
-                        observaciones = st.text_area("Observaciones:")
-                        archivo_subido = st.file_uploader("Adjuntar comprobante (Opcional):", type=["pdf", "png", "jpg", "jpeg"])
-                        
-                        btn_guardar = st.form_submit_button("💾 Guardar en Inventario")
-                        
-                        if btn_guardar:
-                            folios_limpios = [f.strip() for f in folios_ingresados if f.strip()]
-                            if len(folios_limpios) == cantidad:
-                                fecha_actual = datetime.now().strftime("%m/%d/%y %H:%M")
-                                
-                                # Subir comprobante a Google Drive
-                                if archivo_subido is not None:
-                                    nombre_archivo = f"{folios_limpios[0]}_{archivo_subido.name}"
-                                    file_metadata = {'name': nombre_archivo, 'parents': [folder_id]}
-                                    media = MediaIoBaseUpload(io.BytesIO(archivo_subido.read()), mimetype=archivo_subido.type, resumable=True)
-                                    drive_service.files().create(body=file_metadata, media_body=media, fields='webViewLink').execute()
+                            observaciones = st.text_area("Observaciones:")
+                            archivo_subido = st.file_uploader("Adjuntar comprobante (Opcional):", type=["pdf", "png", "jpg", "jpeg"])
+                            
+                            btn_guardar = st.form_submit_button("💾 Guardar en Inventario")
+                            
+                            if btn_guardar:
+                                folios_limpios = [f.strip() for f in folios_ingresados if f.strip()]
+                                if len(folios_limpios) == cantidad:
+                                    fecha_actual = datetime.now().strftime("%m/%d/%y %H:%M")
+                                    
+                                    # Subir comprobante a Google Drive
+                                    if archivo_subido is not None:
+                                        nombre_archivo = f"{folios_limpios[0]}_{archivo_subido.name}"
+                                        file_metadata = {'name': nombre_archivo, 'parents': [folder_id]}
+                                        media = MediaIoBaseUpload(io.BytesIO(archivo_subido.read()), mimetype=archivo_subido.type, resumable=True)
+                                        drive_service.files().create(body=file_metadata, media_body=media, fields='webViewLink').execute()
 
-                                # Agregar una fila por cada folio ingresado
-                                for folio in folios_limpios:
-                                    val_folio_maletin = folio if (es_maletin or tipo_prod == "MALETIN") else folio_maletin.strip()
+                                    # Agregar una fila por cada folio ingresado
+                                    for folio in folios_limpios:
+                                        # Si el producto seleccionado en sí mismo es un maletín, su folio de maletín es su propio folio de producto
+                                        val_folio_maletin = folio if (es_maletin or tipo_prod == "MALETIN") else folio_maletin_input
 
-                                    nueva_fila = [
-                                        str(folio),                 # A: Folio de producto
-                                        str(clave_producto),        # B: Clave de Producto
-                                        str(producto_seleccionado), # C: Producto
-                                        str(tipo_prod),             # D: Tipo
-                                        str(uso_prod),              # E: Uso
-                                        str(planillas),             # F: Planillas
-                                        str(fecha_actual),          # G: Fecha
-                                        str(no_serie),              # H: No. de Serie
-                                        str(caja),                  # I: Caja
-                                        str(estatus),               # J: Estatus
-                                        str(val_folio_maletin),     # K: Folio del Maletín
-                                        str(entidad_envio),         # L: Entidad de Envío
-                                        str(registrado_por),        # M: Registrado Por
-                                        "1",                        # N: Cantidad
-                                        str(servidor_seleccionado), # O: Servidor de la Salud
-                                        str(observaciones)          # P: Observaciones
-                                    ]
-                                    ws_inventario.append_row(nueva_fila)
+                                        nueva_fila = [
+                                            str(folio),                 # A: Folio de producto
+                                            str(clave_producto),        # B: Clave de Producto
+                                            str(producto_seleccionado), # C: Producto
+                                            str(tipo_prod),             # D: Tipo
+                                            str(uso_prod),              # E: Uso
+                                            str(planillas),             # F: Planillas
+                                            str(fecha_actual),          # G: Fecha
+                                            str(no_serie),              # H: No. de Serie
+                                            str(caja),                  # I: Caja
+                                            str(estatus),               # J: Estatus
+                                            str(val_folio_maletin),     # K: Folio del Maletín
+                                            str(entidad_envio),         # L: Entidad de Envío
+                                            str(registrado_por),        # M: Registrado Por
+                                            "1",                        # N: Cantidad
+                                            str(servidor_seleccionado), # O: Servidor de la Salud
+                                            str(observaciones)          # P: Observaciones
+                                        ]
+                                        ws_inventario.append_row(nueva_fila)
 
-                                st.success(f"¡Se registraron exitosamente {len(folios_limpios)} unidad(es) de **{producto_seleccionado}**!")
-                                st.rerun()
-                            else:
-                                st.warning(f"Ingresa los {cantidad} folios requeridos (llevas {len(folios_limpios)} de {cantidad}).")
+                                    st.success(f"¡Se registraron exitosamente {len(folios_limpios)} unidad(es) de **{producto_seleccionado}** para el maletín **{folio_maletin_input}**!")
+                                    st.rerun()
+                                else:
+                                    st.warning(f"Ingresa los {cantidad} folios requeridos (llevas {len(folios_limpios)} de {cantidad}).")
+                else:
+                    st.info("👈 Por favor ingresa el **Folio del Maletín** arriba para desplegar el catálogo de productos.")
+
             else:
                 st.info("No se encontraron registros de Servidores de la Salud en la hoja. Agrega uno nuevo en la siguiente pestaña.")
 
@@ -274,7 +278,7 @@ if gc and drive_service:
                             # Crear carpeta en Google Drive
                             folder_id, folder_link = obtener_o_crear_carpeta(nombre_limpio, CARPETA_PERSONAL_ID)
                             
-                            # Insertar un registro inicial básico en Google Sheets para que aparezca en el selectbox
+                            # Insertar registro inicial
                             fecha_actual = datetime.now().strftime("%m/%d/%y %H:%M")
                             fila_inicial = [
                                 "N/A", "N/A", "REGISTRO INICIAL", "SISTEMA", "N/A",

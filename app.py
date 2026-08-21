@@ -70,7 +70,6 @@ def formatear_encabezado_hoja(worksheet):
             "bold": True # Negrita
         }
     }
-    # Formatear el rango A1:Q1
     worksheet.format("A1:Q1", fmt)
 
 def obtener_o_crear_carpeta(nombre_servidor, parent_folder_id):
@@ -161,7 +160,6 @@ if gc and drive_service:
                 st.divider()
                 st.subheader("📋 Configuración del Maletín")
                 
-                # Fila 1 de Configuración: Número de Maletín y Folio/Clave
                 col1, col2 = st.columns(2)
                 with col1:
                     opciones_maletin = [f"Maletín {i}" for i in range(1, 21)]
@@ -175,7 +173,6 @@ if gc and drive_service:
                         placeholder="Ej. MAL-2024-001"
                     ).strip()
 
-                # Fila 2 de Configuración: Entidad de Envío y Registrado Por
                 col3, col4 = st.columns(2)
                 with col3:
                     entidad_envio_gen = st.text_input(
@@ -296,23 +293,34 @@ if gc and drive_service:
                 if btn_agregar:
                     nombre_limpio = nuevo_nombre.strip().upper()
                     if nombre_limpio:
-                        if nombre_limpio in [n.upper() for n in nombres_hojas]:
+                        if nombre_limpio in [n.strip().upper() for n in nombres_hojas]:
                             st.warning("Ya existe un Servidor con este nombre.")
                         else:
+                            # 1. Agregar a la pestaña 'PERSONAL DE SALUD' de forma segura
                             try:
-                                ws_indice = sh_maestro.worksheet("PERSONAL DE SALUD")
+                                ws_indice = None
+                                for sheet in sh_maestro.worksheets():
+                                    if sheet.title.strip().upper() == "PERSONAL DE SALUD":
+                                        ws_indice = sheet
+                                        break
+                                
+                                if ws_indice is None:
+                                    ws_indice = sh_maestro.add_worksheet(title="PERSONAL DE SALUD", rows="100", cols="5")
+                                    ws_indice.append_row(["PERSONAL DE SALUD"])
+                                
                                 ws_indice.append_row([nombre_limpio])
-                            except Exception:
-                                pass
+                            except Exception as e_ind:
+                                st.error(f"Error al escribir en PERSONAL DE SALUD: {e_ind}")
 
+                            # 2. Crear carpeta en Drive
                             folder_id, folder_link = obtener_o_crear_carpeta(nombre_limpio, CARPETA_PERSONAL_ID)
-                            nueva_hoja = sh_maestro.add_worksheet(title=nombre_limpio, rows="100", cols="20")
                             
-                            # Insertar encabezados y aplicar formato de color + tamaño
+                            # 3. Crear nueva pestaña individual
+                            nueva_hoja = sh_maestro.add_worksheet(title=nombre_limpio, rows="100", cols="20")
                             nueva_hoja.append_row(ENCABEZADOS)
                             formatear_encabezado_hoja(nueva_hoja)
                             
-                            st.success(f"¡Se agregó **{nombre_limpio}** a 'PERSONAL DE SALUD', se creó su pestaña formateada y su carpeta en Drive!")
+                            st.success(f"¡Se agregó **{nombre_limpio}** a 'PERSONAL DE SALUD', se creó su pestaña y su carpeta en Drive!")
                             st.rerun()
                     else:
                         st.warning("Escribe un nombre válido.")
@@ -337,10 +345,16 @@ if gc and drive_service:
                 if st.button("🗑️ Eliminar Definitivamente", type="primary", disabled=not confirmacion):
                     try:
                         try:
-                            ws_indice = sh_maestro.worksheet("PERSONAL DE SALUD")
-                            celda = ws_indice.find(servidor_a_eliminar)
-                            if celda:
-                                ws_indice.delete_rows(celda.row)
+                            ws_indice = None
+                            for sheet in sh_maestro.worksheets():
+                                if sheet.title.strip().upper() == "PERSONAL DE SALUD":
+                                    ws_indice = sheet
+                                    break
+                            
+                            if ws_indice:
+                                celda = ws_indice.find(servidor_a_eliminar)
+                                if celda:
+                                    ws_indice.delete_rows(celda.row)
                         except Exception:
                             pass
 

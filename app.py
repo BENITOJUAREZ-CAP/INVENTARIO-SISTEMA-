@@ -76,7 +76,7 @@ if gc and drive_service:
         hojas_objetos = sh_maestro.worksheets()
         nombres_hojas = [h.title for h in hojas_objetos]
         
-        # Filtrar hojas que pertenecen a Servidores (excluyendo hojas del sistema como PRODUCTOS)
+        # Filtrar hojas que pertenecen a Servidores (excluyendo hojas del sistema)
         hojas_reservadas = ["PRODUCTOS", "PERSONAL DE SALUD", "HOJA 1", "PLANTILLA"]
         lista_servidores = [
             h for h in nombres_hojas 
@@ -95,9 +95,10 @@ if gc and drive_service:
                 pass
 
         # --- PESTAÑAS DE LA APLICACIÓN ---
-        tab_consultar, tab_agregar_persona = st.tabs([
+        tab_consultar, tab_agregar_persona, tab_eliminar_persona = st.tabs([
             "🔍 Consultar y Asignar Productos", 
-            "➕ Agregar Nuevo Servidor de la Salud"
+            "➕ Agregar Nuevo Servidor",
+            "❌ Eliminar Servidor"
         ])
         
         # === PESTAÑA 1: CONSULTA Y ASIGNACIÓN ===
@@ -260,7 +261,7 @@ if gc and drive_service:
                             # 1. Crear carpeta en Google Drive
                             folder_id, folder_link = obtener_o_crear_carpeta(nombre_limpio, CARPETA_PERSONAL_ID)
                             
-                            # 2. Crear una NUEVA PEŠTAÑA/HOJA específica para esta persona
+                            # 2. Crear una NUEVA PESTAÑA/HOJA específica para esta persona
                             nueva_hoja = sh_maestro.add_worksheet(title=nombre_limpio, rows="100", cols="20")
                             
                             # 3. Insertar los encabezados estándar en la fila 1
@@ -270,6 +271,34 @@ if gc and drive_service:
                             st.rerun()
                     else:
                         st.warning("Escribe un nombre válido.")
+
+        # === PESTAÑA 3: ELIMINAR SERVIDOR DE LA SALUD ===
+        with tab_eliminar_persona:
+            st.subheader("❌ Eliminar Servidor de la Salud del Sistema")
+            st.warning("⚠️ **Atención:** Esta acción eliminará permanentemente la pestaña del Servidor de la Salud seleccionada en el archivo de Google Sheets.")
+            
+            if lista_servidores:
+                servidor_a_eliminar = st.selectbox(
+                    "Selecciona el Servidor de la Salud a eliminar:",
+                    options=sorted(lista_servidores),
+                    key="select_eliminar_servidor"
+                )
+                
+                confirmacion = st.checkbox(
+                    f"Confirmo que deseo eliminar la pestaña **{servidor_a_eliminar}** y todo su contenido.",
+                    key="chk_confirmar_eliminar"
+                )
+                
+                if st.button("🗑️ Eliminar Definitivamente", type="primary", disabled=not confirmacion):
+                    try:
+                        hoja_borrar = sh_maestro.worksheet(servidor_a_eliminar)
+                        sh_maestro.del_worksheet(hoja_borrar)
+                        st.success(f"¡La pestaña de **{servidor_a_eliminar}** ha sido eliminada correctamente del archivo!")
+                        st.rerun()
+                    except Exception as err:
+                        st.error(f"Error al intentar eliminar la pestaña: {err}")
+            else:
+                st.info("No hay Servidores de la Salud registrados para eliminar.")
 
     except Exception as e:
         st.error("Error al procesar el libro de Google Sheets:")

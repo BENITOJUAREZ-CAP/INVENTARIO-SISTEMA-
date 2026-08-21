@@ -17,7 +17,6 @@ st.set_page_config(
 # IDs de Google Drive / Sheets
 EXCEL_MAESTRO_ID = "1Chjc0zz3T0qF6TaydjQxLa7bI12sT2ZS11gYl6aeun0"
 CARPETA_PERSONAL_ID = "1QVW-qYDtNGYX9CjFIjzD0isYTRFj2F-u"
-CARPETA_PRINCIPAL_ID = "14nPwqk129lZn5ACi12GN4RoAAvIvQIJh"
 
 SCOPE = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -73,56 +72,27 @@ if gc and drive_service:
     try:
         sh_maestro = gc.open_by_key(EXCEL_MAESTRO_ID)
         
-        # --- OBTENER HOJA PRINCIPAL DE DATOS ---
-        hojas = sh_maestro.worksheets()
-        nombres_hojas = [h.title for h in hojas]
+        # Obtener todas las pestañas/hojas existentes
+        hojas_objetos = sh_maestro.worksheets()
+        nombres_hojas = [h.title for h in hojas_objetos]
         
-        if "PERSONAL DE SALUD" in nombres_hojas:
-            ws_inventario = sh_maestro.worksheet("PERSONAL DE SALUD")
-        elif "Hoja 1" in nombres_hojas:
-            ws_inventario = sh_maestro.worksheet("Hoja 1")
-        else:
-            ws_inventario = hojas[0]
-
-        # Lectura segura de datos
-        valores_raw = ws_inventario.get_all_values()
+        # Filtrar hojas que pertenecen a Servidores (excluyendo hojas del sistema como PRODUCTOS)
+        hojas_reservadas = ["PRODUCTOS", "PERSONAL DE SALUD", "HOJA 1", "PLANTILLA"]
+        lista_servidores = [
+            h for h in nombres_hojas 
+            if h.strip().upper() not in hojas_reservadas
+        ]
         
-        if len(valores_raw) > 1:
-            encabezados_hoja = [str(col).strip() for col in valores_raw[0]]
-            filas_datos = valores_raw[1:]
-            df_general = pd.DataFrame(filas_datos, columns=encabezados_hoja).astype(str)
-        else:
-            df_general = pd.DataFrame(columns=ENCABEZADOS)
-
-        # Normalizar nombres de columnas
-        columnas_normalizadas = {col: col.strip().upper() for col in df_general.columns}
-        df_general.rename(columns=columnas_normalizadas, inplace=True)
-
-        # Buscar la columna del Servidor de la Salud
-        col_servidor = None
-        for col in df_general.columns:
-            if "SERVIDOR" in col and "SALUD" in col:
-                col_servidor = col
-                break
-
-        if col_servidor:
-            lista_servidores = sorted(list(set(df_general[col_servidor].str.strip().unique())))
-            lista_servidores = [
-                s for s in lista_servidores 
-                if s and s.upper() not in ["NONE", "NAN", "", "SERVIDOR DE LA SALUD"]
-            ]
-        else:
-            lista_servidores = []
-
         # --- OBTENER CATÁLOGO DESDE LA PESTAÑA "PRODUCTOS" ---
         lista_productos = []
-        try:
-            ws_productos = sh_maestro.worksheet("PRODUCTOS")
-            valores_productos = ws_productos.get_all_values()
-            lista_productos = [fila[0].strip() for fila in valores_productos if fila and fila[0].strip()]
-            lista_productos = [p for p in lista_productos if p.upper() not in ["PRODUCTO", "PRODUCTOS", "CONCEPTO"]]
-        except Exception:
-            pass
+        if "PRODUCTOS" in [h.upper() for h in nombres_hojas]:
+            try:
+                ws_productos = sh_maestro.worksheet("PRODUCTOS")
+                valores_productos = ws_productos.get_all_values()
+                lista_productos = [fila[0].strip() for fila in valores_productos if fila and fila[0].strip()]
+                lista_productos = [p for p in lista_productos if p.upper() not in ["PRODUCTO", "PRODUCTOS", "CONCEPTO"]]
+            except Exception:
+                pass
 
         # --- PESTAÑAS DE LA APLICACIÓN ---
         tab_consultar, tab_agregar_persona = st.tabs([
@@ -133,19 +103,24 @@ if gc and drive_service:
         # === PESTAÑA 1: CONSULTA Y ASIGNACIÓN ===
         with tab_consultar:
             if lista_servidores:
-                # PASO 1: Seleccionar Servidor de la Salud
                 servidor_seleccionado = st.selectbox(
                     "1️⃣ Selecciona un Servidor de la Salud:", 
-                    options=lista_servidores
+                    options=sorted(lista_servidores)
                 )
                 
-                # Filtrar registros del servidor seleccionado
-                if col_servidor:
-                    df_filtrado = df_general[df_general[col_servidor].str.strip() == servidor_seleccionado]
+                # Obtener la hoja individual del servidor seleccionado
+                ws_servidor = sh_maestro.worksheet(servidor_seleccionado)
+                valores_raw = ws_servidor.get_all_values()
+                
+                if len(valores_raw) > 1:
+                    raw_cols = [str(col).strip().upper() for col in valores_raw[0]]
+                    cleaned_cols = [c if c else f"COLUMNA_{i+1}" for i, c in enumerate(raw_cols)]
+                    df_filtrado = pd.DataFrame(valores_raw[1:], columns=cleaned_cols).astype(str)
+                    df_filtrado = df_filtrado.loc[:, ~df_filtrado.columns.duplicated()]
                 else:
                     df_filtrado = pd.DataFrame(columns=ENCABEZADOS)
                 
-                st.write(f"### Inventario actual registrado para: **{servidor_seleccionado}**")
+                st.write(f"### Inventario actual en la hoja de: **{servidor_seleccionado}**")
                 st.dataframe(df_filtrado, use_container_width=True)
                 
                 folder_id, folder_link = obtener_o_crear_carpeta(servidor_seleccionado, CARPETA_PERSONAL_ID)
@@ -154,10 +129,9 @@ if gc and drive_service:
                 st.divider()
                 st.subheader("📋 Configuración del Maletín")
                 
-                # PASO 2 Y 3: Seleccionar Número de Maletín e Ingresar su Folio
                 col1, col2 = st.columns(2)
                 with col1:
-                    opciones_maletin = [f"Maletín {i}" for i in range(1, 21)]  # Genera Maletín 1 hasta Maletín 20
+                    opciones_maletin = [f"Maletín {i}" for i in range(1, 21)]
                     maletin_num_seleccionado = st.selectbox(
                         "2️⃣ Selecciona el número de Maletín:", 
                         options=opciones_maletin
@@ -170,7 +144,6 @@ if gc and drive_service:
 
                 st.divider()
 
-                # PASO 4: Desplegar Productos solo cuando se haya ingresado el folio del maletín
                 if folio_maletin_input:
                     st.success(f"✅ Configuración lista: **{maletin_num_seleccionado}** con Folio **{folio_maletin_input}** para **{servidor_seleccionado}**")
                     
@@ -224,21 +197,20 @@ if gc and drive_service:
                             observaciones = st.text_area("Observaciones:")
                             archivo_subido = st.file_uploader("Adjuntar comprobante (Opcional):", type=["pdf", "png", "jpg", "jpeg"])
                             
-                            btn_guardar = st.form_submit_button("💾 Guardar en Inventario")
+                            btn_guardar = st.form_submit_button("💾 Guardar en Hoja del Servidor")
                             
                             if btn_guardar:
                                 folios_limpios = [f.strip() for f in folios_ingresados if f.strip()]
                                 if len(folios_limpios) == cantidad:
                                     fecha_actual = datetime.now().strftime("%m/%d/%y %H:%M")
                                     
-                                    # Subir comprobante a Google Drive
                                     if archivo_subido is not None:
                                         nombre_archivo = f"{folios_limpios[0]}_{archivo_subido.name}"
                                         file_metadata = {'name': nombre_archivo, 'parents': [folder_id]}
                                         media = MediaIoBaseUpload(io.BytesIO(archivo_subido.read()), mimetype=archivo_subido.type, resumable=True)
                                         drive_service.files().create(body=file_metadata, media_body=media, fields='webViewLink').execute()
 
-                                    # Agregar una fila por cada folio ingresado
+                                    # Agregar a la pestaña personal del Servidor
                                     for folio in folios_limpios:
                                         val_folio_maletin = folio if (es_maletin or tipo_prod == "MALETIN") else folio_maletin_input
 
@@ -260,47 +232,45 @@ if gc and drive_service:
                                             str(servidor_seleccionado), # O: Servidor de la Salud
                                             str(observaciones)          # P: Observaciones
                                         ]
-                                        ws_inventario.append_row(nueva_fila)
+                                        ws_servidor.append_row(nueva_fila)
 
-                                    st.success(f"¡Se registraron exitosamente {len(folios_limpios)} unidad(es) de **{producto_seleccionado}** para {maletin_num_seleccionado} (Folio: {folio_maletin_input})!")
+                                    st.success(f"¡Se guardaron {len(folios_limpios)} registro(s) directamente en la pestaña de **{servidor_seleccionado}**!")
                                     st.rerun()
                                 else:
                                     st.warning(f"Ingresa los {cantidad} folios requeridos (llevas {len(folios_limpios)} de {cantidad}).")
                 else:
-                    st.info("👈 Ingresa el **Folio/Clave del Maletín** en el paso 3 para desbloquear y desplegar la lista de productos del catálogo.")
+                    st.info("👈 Ingresa el **Folio/Clave del Maletín** en el paso 3 para desbloquear los productos.")
 
             else:
-                st.info("No se encontraron registros de Servidores de la Salud en la hoja. Agrega uno nuevo en la siguiente pestaña.")
+                st.info("No se encontraron pestañas de Servidores de la Salud. Registra uno en la pestaña contigua.")
 
         # === PESTAÑA 2: AGREGAR NUEVO SERVIDOR DE LA SALUD ===
         with tab_agregar_persona:
-            st.subheader("➕ Registrar Nuevo Servidor de la Salud")
+            st.subheader("➕ Crear Pestaña y Carpeta para Nuevo Servidor")
             with st.form("form_nuevo_servidor", clear_on_submit=True):
                 nuevo_nombre = st.text_input("Nombre completo del Servidor de la Salud:")
-                btn_agregar = st.form_submit_button("➕ Registrar Servidor y Crear Carpeta")
+                btn_agregar = st.form_submit_button("➕ Crear Hoja Individual y Carpeta")
                 
                 if btn_agregar:
                     nombre_limpio = nuevo_nombre.strip().upper()
                     if nombre_limpio:
-                        if nombre_limpio in [s.upper() for s in lista_servidores]:
-                            st.warning("Este Servidor ya existe en la lista.")
+                        if nombre_limpio in [n.upper() for n in nombres_hojas]:
+                            st.warning("Ya existe una pestaña con este nombre en el archivo Excel.")
                         else:
+                            # 1. Crear carpeta en Google Drive
                             folder_id, folder_link = obtener_o_crear_carpeta(nombre_limpio, CARPETA_PERSONAL_ID)
                             
-                            fecha_actual = datetime.now().strftime("%m/%d/%y %H:%M")
-                            fila_inicial = [
-                                "N/A", "N/A", "REGISTRO INICIAL", "SISTEMA", "N/A",
-                                "0", fecha_actual, "N/A", "N/A", "ALTA",
-                                "N/A", "CIUDAD DE MEXICO", "SISTEMA", "0",
-                                nombre_limpio, "Registro de Servidor"
-                            ]
-                            ws_inventario.append_row(fila_inicial)
+                            # 2. Crear una NUEVA PEŠTAÑA/HOJA específica para esta persona
+                            nueva_hoja = sh_maestro.add_worksheet(title=nombre_limpio, rows="100", cols="20")
                             
-                            st.success(f"¡Servidor **{nombre_limpio}** registrado con éxito!")
+                            # 3. Insertar los encabezados estándar en la fila 1
+                            nueva_hoja.append_row(ENCABEZADOS)
+                            
+                            st.success(f"¡Se ha creado la pestaña **{nombre_limpio}** en el Excel Maestro y su carpeta en Drive!")
                             st.rerun()
                     else:
                         st.warning("Escribe un nombre válido.")
 
     except Exception as e:
-        st.error("Error al procesar los datos de la hoja:")
+        st.error("Error al procesar el libro de Google Sheets:")
         st.exception(e)

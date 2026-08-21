@@ -64,29 +64,35 @@ if gc and drive_service:
     try:
         sh_maestro = gc.open_by_key(EXCEL_MAESTRO_ID)
         
-        # --- OBTENER LISTA DE SERVIDORES (De las pestañas personales o del listado maestro) ---
-        todas_las_hojas = [ws.title for ws.title in sh_maestro.worksheets()]
-        hojas_reservadas = ["PRODUCTOS", "PERSONAL DE SALUDA", "Hoja 1"]
+        # --- OBTENER LISTA DE SERVIDORES ---
+        hojas = sh_maestro.worksheets()
+        todas_las_hojas = [hoja.title for hoja in hojas]
+        hojas_reservadas = ["PRODUCTOS", "PERSONAL DE SALUDA", "PERSONAL DE SALUD", "Hoja 1"]
         lista_servidores = [h for h in todas_las_hojas if h not in hojas_reservadas]
         
-        # Si existe la pestaña "PERSONAL DE SALUDA", extraer de ahí también
-        try:
-            ws_personal = sh_maestro.worksheet("PERSONAL DE SALUDA")
-            datos_personal = ws_personal.get_all_values()
-            nombres_personal = [fila[0] for fila in datos_personal if fila and fila[0].strip()]
-            lista_servidores = sorted(list(set(lista_servidores + nombres_personal)))
-        except:
-            pass
+        # Intentar obtener nombres desde la pestaña "PERSONAL DE SALUDA" si existe
+        for nombre_pestaña_personal in ["PERSONAL DE SALUDA", "PERSONAL DE SALUD"]:
+            try:
+                ws_personal = sh_maestro.worksheet(nombre_pestaña_personal)
+                datos_personal = ws_personal.get_all_values()
+                nombres_personal = [fila[0].strip() for fila in datos_personal if fila and fila[0].strip()]
+                # Excluir el encabezado si coincide
+                nombres_personal = [n for n in nombres_personal if n.upper() not in ["NOMBRE", "SERVIDOR DE LA SALUD", "SERVIDOR DE LA SALUDA"]]
+                lista_servidores = sorted(list(set(lista_servidores + nombres_personal)))
+                break
+            except:
+                pass
 
         # --- OBTENER CATÁLOGO DESDE LA PESTAÑA "PRODUCTOS" ---
         lista_productos = []
         try:
             ws_productos = sh_maestro.worksheet("PRODUCTOS")
             valores_productos = ws_productos.get_all_values()
-            # Lee todos los elementos no vacíos de la columna A
             lista_productos = [fila[0].strip() for fila in valores_productos if fila and fila[0].strip()]
+            # Filtrar encabezados si los hay
+            lista_productos = [p for p in lista_productos if p.upper() not in ["PRODUCTO", "PRODUCTOS", "CONCEPTO"]]
         except Exception as e:
-            st.warning("No se pudo cargar la pestaña 'PRODUCTOS'. Verifica el nombre exacto de la pestaña en Google Sheets.")
+            st.warning("No se pudo cargar la pestaña 'PRODUCTOS'. Verifica el nombre exacto de la pestaña.")
 
         # --- PESTAÑAS DE LA APLICACIÓN ---
         tab_consultar, tab_agregar_persona, tab_eliminar_persona = st.tabs([

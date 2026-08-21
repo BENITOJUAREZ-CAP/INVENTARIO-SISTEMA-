@@ -50,6 +50,29 @@ def get_services():
 
 gc, drive_service = get_services()
 
+def formatear_encabezado_hoja(worksheet):
+    """Aplica formato visual a la primera fila (encabezado) de la hoja de cálculo"""
+    fmt = {
+        "backgroundColor": {
+            "red": 0.12,
+            "green": 0.31,
+            "blue": 0.47
+        }, # Color Azul Oscuro (#1F4E78)
+        "horizontalAlignment": "CENTER",
+        "verticalAlignment": "MIDDLE",
+        "textFormat": {
+            "foregroundColor": {
+                "red": 1.0,
+                "green": 1.0,
+                "blue": 1.0
+            }, # Texto Blanco
+            "fontSize": 12, # Tamaño de letra más grande
+            "bold": True # Negrita
+        }
+    }
+    # Formatear el rango A1:Q1
+    worksheet.format("A1:Q1", fmt)
+
 def obtener_o_crear_carpeta(nombre_servidor, parent_folder_id):
     query = f"'{parent_folder_id}' in parents and name = '{nombre_servidor}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
     results = drive_service.files().list(q=query, fields="files(id, name, webViewLink)").execute()
@@ -126,9 +149,15 @@ if gc and drive_service:
                 st.write(f"### Inventario actual en la hoja de: **{servidor_seleccionado}**")
                 st.dataframe(df_filtrado, use_container_width=True)
                 
-                folder_id, folder_link = obtener_o_crear_carpeta(servidor_seleccionado, CARPETA_PERSONAL_ID)
-                st.markdown(f"📂 **Carpeta en Google Drive:** [Abrir carpeta personal de {servidor_seleccionado}]({folder_link})")
-                
+                col_folder, col_fmt = st.columns([2, 1])
+                with col_folder:
+                    folder_id, folder_link = obtener_o_crear_carpeta(servidor_seleccionado, CARPETA_PERSONAL_ID)
+                    st.markdown(f"📂 **Carpeta en Google Drive:** [Abrir carpeta personal de {servidor_seleccionado}]({folder_link})")
+                with col_fmt:
+                    if st.button("🎨 Aplicar formato a encabezados en Google Sheets"):
+                        formatear_encabezado_hoja(ws_servidor)
+                        st.success("¡Encabezados formateados con éxito en la hoja de cálculo!")
+
                 st.divider()
                 st.subheader("📋 Configuración del Maletín")
                 
@@ -146,7 +175,7 @@ if gc and drive_service:
                         placeholder="Ej. MAL-2024-001"
                     ).strip()
 
-                # Fila 2 de Configuración: Entidad de Envío y Registrado Por (ColM y ColN generales)
+                # Fila 2 de Configuración: Entidad de Envío y Registrado Por
                 col3, col4 = st.columns(2)
                 with col3:
                     entidad_envio_gen = st.text_input(
@@ -239,8 +268,8 @@ if gc and drive_service:
                                             str(estatus),                   # J: Estatus
                                             str(val_folio_maletin),         # K: Folio del Maletín
                                             str(maletin_num_seleccionado),  # L: Número de Maletín
-                                            str(entidad_envio_gen),         # M: Entidad de Envío (General)
-                                            str(registrado_por_gen),        # N: Registrado Por (General)
+                                            str(entidad_envio_gen),         # M: Entidad de Envío
+                                            str(registrado_por_gen),        # N: Registrado Por
                                             "1",                            # O: Cantidad
                                             str(servidor_seleccionado),     # P: Servidor de la Salud
                                             str(observaciones)              # Q: Observaciones
@@ -278,9 +307,12 @@ if gc and drive_service:
 
                             folder_id, folder_link = obtener_o_crear_carpeta(nombre_limpio, CARPETA_PERSONAL_ID)
                             nueva_hoja = sh_maestro.add_worksheet(title=nombre_limpio, rows="100", cols="20")
-                            nueva_hoja.append_row(ENCABEZADOS)
                             
-                            st.success(f"¡Se agregó **{nombre_limpio}** a 'PERSONAL DE SALUD', se creó su pestaña y su carpeta en Drive!")
+                            # Insertar encabezados y aplicar formato de color + tamaño
+                            nueva_hoja.append_row(ENCABEZADOS)
+                            formatear_encabezado_hoja(nueva_hoja)
+                            
+                            st.success(f"¡Se agregó **{nombre_limpio}** a 'PERSONAL DE SALUD', se creó su pestaña formateada y su carpeta en Drive!")
                             st.rerun()
                     else:
                         st.warning("Escribe un nombre válido.")

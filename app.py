@@ -13,7 +13,6 @@ st.set_page_config(
 
 # IDs de Google Sheets
 EXCEL_MAESTRO_ID = "1Chjc0zz3T0qF6TaydjQxLa7bI12sT2ZS11gYl6aeun0"
-# ID de REGISTRO E INVENTARIO DE MALETINES (Actualizado)
 EXCEL_MALETINES_ID = "1NCxdzjkr49t4pB_AzL5fhQ7ZfVmIVSHoUvDkpjK5flY"
 
 SCOPE = [
@@ -122,96 +121,118 @@ if gc:
     with tab_registro_maletines:
       st.subheader("📝 Captura de Contenido del Maletín")
 
+      # Cargar maletines existentes
+      hojas_maletines_existentes = [
+          h.title
+          for h in sh_maletines.worksheets()
+          if h.title.upper() != "PRODUCTOS"
+      ]
+
       col_m1, col_m2 = st.columns(2)
       with col_m1:
-        opciones_maletines = [f"MALETIN {i}" for i in range(1, 31)]
-        maletin_sel = st.selectbox(
-            "Selecciona el Maletín a armar:", options=opciones_maletines
-        )
+        # Permite elegir un maletín existente o ingresar un número/nombre nuevo sin límite
+        opcion_maletin_input = st.text_input(
+            "1️⃣ Número / Nombre del Maletín:",
+            value=hojas_maletines_existentes[0] if hojas_maletines_existentes else "MALETIN 1",
+            placeholder="Ej. MALETIN 1, MALETIN 50, etc.",
+        ).strip().upper()
 
-      # Obtener o crear la hoja del maletín
-      try:
-        ws_maletin = sh_maletines.worksheet(maletin_sel)
-      except Exception:
-        ws_maletin = sh_maletines.add_worksheet(
-            title=maletin_sel, rows="100", cols="20"
-        )
-        ws_maletin.append_row(ENCABEZADOS)
-        formatear_encabezado_hoja(ws_maletin)
+        if hojas_maletines_existentes:
+          maletin_sel_dropdown = st.selectbox(
+              "O selecciona de los maletines ya creados:",
+              options=["-- Seleccionar existente --"] + sorted(hojas_maletines_existentes),
+          )
+          if maletin_sel_dropdown != "-- Seleccionar existente --":
+            opcion_maletin_input = maletin_sel_dropdown
 
-      # Mostrar tabla actual del maletín
-      vals_m = ws_maletin.get_all_values()
-      if len(vals_m) > 1:
-        cols_m = [
-            c if c else f"COL_{i+1}"
-            for i, c in enumerate([str(x).strip().upper() for x in vals_m[0]])
-        ]
-        df_maletin = pd.DataFrame(vals_m[1:], columns=cols_m).astype(str)
-        st.write(f"### Contenido actual registrado en: **{maletin_sel}**")
-        st.dataframe(df_maletin, use_container_width=True)
-      else:
-        st.info(f"El **{maletin_sel}** aún no tiene insumos o productos registrados.")
+      with col_m2:
+        folio_maletin_input = st.text_input(
+            "2️⃣ Folio del Maletín (Columna K):",
+            placeholder="Ej. MAL-2026-001",
+        ).strip()
 
-      st.divider()
+      maletin_sel = opcion_maletin_input
 
-      with st.form("form_agregar_insumo", clear_on_submit=True):
-        st.markdown(f"#### ➕ Agregar Producto a **{maletin_sel}**")
+      if maletin_sel:
+        # Obtener o crear la hoja del maletín
+        try:
+          ws_maletin = sh_maletines.worksheet(maletin_sel)
+        except Exception:
+          ws_maletin = sh_maletines.add_worksheet(
+              title=maletin_sel, rows="100", cols="20"
+          )
+          ws_maletin.append_row(ENCABEZADOS)
+          formatear_encabezado_hoja(ws_maletin)
 
-        col_p1, col_p2 = st.columns(2)
-        with col_p1:
+        # Mostrar tabla actual del maletín
+        vals_m = ws_maletin.get_all_values()
+        if len(vals_m) > 1:
+          cols_m = [
+              c if c else f"COL_{i+1}"
+              for i, c in enumerate([str(x).strip().upper() for x in vals_m[0]])
+          ]
+          df_maletin = pd.DataFrame(vals_m[1:], columns=cols_m).astype(str)
+          st.write(f"### Contenido actual registrado en: **{maletin_sel}**")
+          st.dataframe(df_maletin, use_container_width=True)
+        else:
+          st.info(f"El **{maletin_sel}** aún no tiene insumos o productos registrados.")
+
+        st.divider()
+
+        with st.form("form_agregar_insumo", clear_on_submit=True):
+          st.markdown(f"#### ➕ Agregar Producto a **{maletin_sel}**")
+
           if lista_productos:
             prod_sel = st.selectbox("Producto (Catálogo):", options=lista_productos)
           else:
             prod_sel = st.text_input("Nombre del Producto:")
-        with col_p2:
-          folio_maletin_input = st.text_input(
-              "Folio del Maletín (Requerido):", placeholder="Ej. MAL-2026-001"
-          )
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-          folio_prod = st.text_input("Folio del Producto / Insumo:")
-          clave_prod = st.text_input("Clave de Producto:")
-          cantidad = st.number_input("Cantidad:", min_value=1, value=1, step=1)
-        with col2:
-          tipo_prod = st.selectbox("Tipo:", ["EQUIPO", "DESECHABLE", "MALETIN", "OTRO"])
-          uso_prod = st.selectbox("Uso:", ["ENFERMERA", "DERECHOHABIENTE", "GENERAL"])
-          estatus = st.selectbox("Estatus:", ["EN ALMACEN", "EN TRANSITO", "ENTREGADO"])
-        with col3:
-          no_serie = st.text_input("No. de Serie (Opcional):")
-          planillas = st.number_input("Planillas:", min_value=0, value=1000, step=100)
-          caja = st.text_input("Caja (Opcional):")
+          col1, col2, col3 = st.columns(3)
+          with col1:
+            folio_prod = st.text_input("Folio del Producto / Insumo:")
+            clave_prod = st.text_input("Clave de Producto:")
+            cantidad = st.number_input("Cantidad:", min_value=1, value=1, step=1)
+          with col2:
+            tipo_prod = st.selectbox("Tipo:", ["EQUIPO", "DESECHABLE", "MALETIN", "OTRO"])
+            uso_prod = st.selectbox("Uso:", ["ENFERMERA", "DERECHOHABIENTE", "GENERAL"])
+            estatus = st.selectbox("Estatus:", ["EN ALMACEN", "EN TRANSITO", "ENTREGADO"])
+          with col3:
+            no_serie = st.text_input("No. de Serie (Opcional):")
+            planillas = st.number_input("Planillas:", min_value=0, value=1000, step=100)
+            caja = st.text_input("Caja (Opcional):")
 
-        obs = st.text_area("Observaciones:")
-        btn_guardar_insumo = st.form_submit_button("💾 Guardar Producto en Maletín")
+          obs = st.text_area("Observaciones:")
+          btn_guardar_insumo = st.form_submit_button("💾 Guardar Producto en Maletín")
 
-        if btn_guardar_insumo:
-          if folio_prod and prod_sel and folio_maletin_input:
-            fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
-            nueva_fila = [
-                str(folio_prod),
-                str(clave_prod),
-                str(prod_sel),
-                str(tipo_prod),
-                str(uso_prod),
-                str(planillas),
-                str(fecha_actual),
-                str(no_serie),
-                str(caja),
-                str(estatus),
-                str(folio_maletin_input),
-                str(maletin_sel),
-                "CIUDAD DE MEXICO",
-                "INVENTARIO SALUD",
-                str(cantidad),
-                "SIN ASIGNAR",
-                str(obs),
-            ]
-            ws_maletin.append_row(nueva_fila)
-            st.success(f"¡Producto **{prod_sel}** agregado exitosamente a **{maletin_sel}** con Folio **{folio_maletin_input}**!")
-            st.rerun()
-          else:
-            st.warning("Por favor completa el Folio del Producto, Nombre del Producto y el Folio del Maletín.")
+          if btn_guardar_insumo:
+            if folio_prod and prod_sel and folio_maletin_input:
+              fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
+              nueva_fila = [
+                  str(folio_prod),
+                  str(clave_prod),
+                  str(prod_sel),
+                  str(tipo_prod),
+                  str(uso_prod),
+                  str(planillas),
+                  str(fecha_actual),
+                  str(no_serie),
+                  str(caja),
+                  str(estatus),
+                  str(folio_maletin_input),
+                  str(maletin_sel),
+                  "CIUDAD DE MEXICO",
+                  "INVENTARIO SALUD",
+                  str(cantidad),
+                  "SIN ASIGNAR",
+                  str(obs),
+              ]
+              ws_maletin.append_row(nueva_fila)
+              st.success(
+                  f"¡Producto **{prod_sel}** agregado exitosamente a **{maletin_sel}** con Folio **{folio_maletin_input}**!"
+              )
+              st.rerun()
+            else:
+              st.warning("Por favor completa el Folio del Producto, Nombre del Producto y el Folio del Maletín.")
 
     # =========================================================
     # PESTAÑA 2: ASIGNAR MALETÍN COMPLETO A SERVIDOR

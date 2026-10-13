@@ -74,6 +74,29 @@ def formatear_encabezado_hoja(worksheet):
   worksheet.format("A1:Q1", fmt)
 
 
+def obtener_lista_personal(sh_maestro):
+  """Lee el catálogo de personal desde la columna A de la pestaña PERSONAL DE SALUD."""
+  try:
+    ws_personal = None
+    for sheet in sh_maestro.worksheets():
+      if "PERSONAL DE SALUD" in sheet.title.upper() or "PERSONAL DE SALUDA" in sheet.title.upper():
+        ws_personal = sheet
+        break
+
+    if ws_personal:
+      valores = ws_personal.col_values(1)
+      # Filtrar encabezados o filas vacías
+      personal = [
+          v.strip().upper()
+          for v in valores
+          if v and v.strip().upper() not in ["PERSONAL DE SALUD", "NOMBRE", "PERSONAL"]
+      ]
+      return ws_personal, sorted(list(set(personal)))
+  except Exception as e:
+    st.error(f"Error al leer la lista de personal: {e}")
+  return None, []
+
+
 st.title("🧰 Control de Inventario por Maletines")
 
 if gc:
@@ -95,18 +118,8 @@ if gc:
     except Exception:
       pass
 
-    # 3. Cargar lista de Servidores de la Salud
-    hojas_maestro = [h.title for h in sh_maestro.worksheets()]
-    hojas_reservadas = [
-        "PERSONAL DE SALUD",
-        "PERSONAL DE SALUDA",
-        "PRODUCTOS",
-        "HOJA 1",
-        "PLANTILLA",
-    ]
-    lista_servidores = [
-        h for h in hojas_maestro if h.strip().upper() not in hojas_reservadas
-    ]
+    # 3. Cargar la lista del Personal de Salud directamente de la pestaña 'PERSONAL DE SALUD'
+    ws_personal_salud, lista_servidores = obtener_lista_personal(sh_maestro)
 
     # Pestañas principales
     tab_registro_maletines, tab_asignacion, tab_gestion = st.tabs([
@@ -130,7 +143,6 @@ if gc:
 
       col_m1, col_m2 = st.columns(2)
       with col_m1:
-        # Permite elegir un maletín existente o ingresar un número/nombre nuevo sin límite
         opcion_maletin_input = st.text_input(
             "1️⃣ Número / Nombre del Maletín:",
             value=hojas_maletines_existentes[0] if hojas_maletines_existentes else "MALETIN 1",
@@ -154,7 +166,6 @@ if gc:
       maletin_sel = opcion_maletin_input
 
       if maletin_sel:
-        # Obtener o crear la hoja del maletín
         try:
           ws_maletin = sh_maletines.worksheet(maletin_sel)
         except Exception:
@@ -164,7 +175,6 @@ if gc:
           ws_maletin.append_row(ENCABEZADOS)
           formatear_encabezado_hoja(ws_maletin)
 
-        # Mostrar tabla actual del maletín
         vals_m = ws_maletin.get_all_values()
         if len(vals_m) > 1:
           cols_m = [
@@ -272,7 +282,13 @@ if gc:
 
             if st.button(f"🚀 Transferir {maletin_a_asignar} a {servidor_destino}", type="primary"):
               try:
-                ws_destino = sh_maestro.worksheet(servidor_destino)
+                # Obtener o crear la pestaña individual para el Servidor
+                try:
+                  ws_destino = sh_maestro.worksheet(servidor_destino)
+                except Exception:
+                  ws_destino = sh_maestro.add_worksheet(title=servidor_destino, rows="100", cols="20")
+                  ws_destino.append_row(ENCABEZADOS)
+                  formatear_encabezado_hoja(ws_destino)
 
                 filas_a_copiar = []
                 for fila in datos_origen[1:]:
@@ -289,7 +305,7 @@ if gc:
           else:
             st.info(f"El **{maletin_a_asignar}** está vacío. Registra insumos en la Pestaña 1 primero.")
       else:
-        st.info("No hay Servidores registrados en la base general.")
+        st.info("No se encontraron registros en la pestaña PERSONAL DE SALUD.")
 
     # =========================================================
     # PESTAÑA 3: GESTIÓN DE PERSONAL
@@ -308,13 +324,22 @@ if gc:
           if btn_add:
             n_limpio = nuevo_nombre.strip().upper()
             if n_limpio:
-              if n_limpio in [h.upper() for h in hojas_maestro]:
+              if n_limpio in lista_servidores:
                 st.warning("Ya existe un Servidor con este nombre.")
               else:
-                nueva_h = sh_maestro.add_worksheet(title=n_limpio, rows="100", cols="20")
-                nueva_h.append_row(ENCABEZADOS)
-                formatear_encabezado_hoja(nueva_h)
-                st.success(f"¡Servidor **{n_limpio}** creado exitosamente!")
+                # Agregar a la lista de la pestaña 'PERSONAL DE SALUD'
+                if ws_personal_salud:
+                  ws_personal_salud.append_row([n_limpio])
+
+                # Crear su pestaña individual en el Excel Maestro
+                try:
+                  nueva_h = sh_maestro.add_worksheet(title=n_limpio, rows="100", cols="20")
+                  nueva_h.append_row(ENCABEZADOS)
+                  formatear_encabezado_hoja(nueva_h)
+                except Exception:
+                  pass
+
+                st.success(f"¡Servidor **{n_limpio}** agregado a PERSONAL DE SALUD exitosamente!")
                 st.rerun()
 
       with col_del:
@@ -327,8 +352,19 @@ if gc:
           chk_confirm = st.checkbox(f"Confirmar eliminación de {servidor_del}")
 
           if st.button("🗑️ Eliminar Definitivamente", disabled=not chk_confirm):
-            hoja_b = sh_maestro.worksheet(servidor_del)
-            sh_maestro.del_worksheet(hoja_b)
+            # Eliminar celda de la pestaña PERSONAL DE SALUD
+            if ws_personal_salud:
+              celda = ws_personal_salud.find(servidor_del)
+              if celda:
+                ws_personal_salud.delete_rows(celda.row)
+
+            # Eliminar pestaña individual si existe
+            try:
+              hoja_b = sh_maestro.worksheet(servidor_del)
+              sh_maestro.del_worksheet(hoja_b)
+            except Exception:
+              pass
+
             st.success(f"¡**{servidor_del}** eliminado correctamente!")
             st.rerun()
 

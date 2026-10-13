@@ -13,7 +13,8 @@ st.set_page_config(
 
 # IDs de Google Sheets
 EXCEL_MAESTRO_ID = "1Chjc0zz3T0qF6TaydjQxLa7bI12sT2ZS11gYl6aeun0"
-EXCEL_MALETINES_ID = "1StjBMVIkueBy9sVy5dNh1yIpG5he-51iCYeeaj_mixM"
+# ID de REGISTRO E INVENTARIO DE MALETINES (Actualizado)
+EXCEL_MALETINES_ID = "1NCxdzjkr49t4pB_AzL5fhQ7ZfVmIVSHoUvDkpjK5flY"
 
 SCOPE = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -120,10 +121,13 @@ if gc:
     # =========================================================
     with tab_registro_maletines:
       st.subheader("📝 Captura de Contenido del Maletín")
-      opciones_maletines = [f"MALETIN {i}" for i in range(1, 31)]
-      maletin_sel = st.selectbox(
-          "Selecciona el Maletín a armar:", options=opciones_maletines
-      )
+
+      col_m1, col_m2 = st.columns(2)
+      with col_m1:
+        opciones_maletines = [f"MALETIN {i}" for i in range(1, 31)]
+        maletin_sel = st.selectbox(
+            "Selecciona el Maletín a armar:", options=opciones_maletines
+        )
 
       # Obtener o crear la hoja del maletín
       try:
@@ -153,10 +157,16 @@ if gc:
       with st.form("form_agregar_insumo", clear_on_submit=True):
         st.markdown(f"#### ➕ Agregar Producto a **{maletin_sel}**")
 
-        if lista_productos:
-          prod_sel = st.selectbox("Producto (Catálogo):", options=lista_productos)
-        else:
-          prod_sel = st.text_input("Nombre del Producto:")
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+          if lista_productos:
+            prod_sel = st.selectbox("Producto (Catálogo):", options=lista_productos)
+          else:
+            prod_sel = st.text_input("Nombre del Producto:")
+        with col_p2:
+          folio_maletin_input = st.text_input(
+              "Folio del Maletín (Requerido):", placeholder="Ej. MAL-2026-001"
+          )
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -168,15 +178,15 @@ if gc:
           uso_prod = st.selectbox("Uso:", ["ENFERMERA", "DERECHOHABIENTE", "GENERAL"])
           estatus = st.selectbox("Estatus:", ["EN ALMACEN", "EN TRANSITO", "ENTREGADO"])
         with col3:
-          folio_maletin_general = st.text_input("Folio del Maletín:", placeholder="Ej. MAL-2026-001")
           no_serie = st.text_input("No. de Serie (Opcional):")
           planillas = st.number_input("Planillas:", min_value=0, value=1000, step=100)
+          caja = st.text_input("Caja (Opcional):")
 
         obs = st.text_area("Observaciones:")
         btn_guardar_insumo = st.form_submit_button("💾 Guardar Producto en Maletín")
 
         if btn_guardar_insumo:
-          if folio_prod and prod_sel:
+          if folio_prod and prod_sel and folio_maletin_input:
             fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
             nueva_fila = [
                 str(folio_prod),
@@ -187,9 +197,9 @@ if gc:
                 str(planillas),
                 str(fecha_actual),
                 str(no_serie),
-                "",
+                str(caja),
                 str(estatus),
-                str(folio_maletin_general),
+                str(folio_maletin_input),
                 str(maletin_sel),
                 "CIUDAD DE MEXICO",
                 "INVENTARIO SALUD",
@@ -198,10 +208,10 @@ if gc:
                 str(obs),
             ]
             ws_maletin.append_row(nueva_fila)
-            st.success(f"¡Producto **{prod_sel}** agregado exitosamente a **{maletin_sel}**!")
+            st.success(f"¡Producto **{prod_sel}** agregado exitosamente a **{maletin_sel}** con Folio **{folio_maletin_input}**!")
             st.rerun()
           else:
-            st.warning("Escribe el Folio y Nombre del Producto.")
+            st.warning("Por favor completa el Folio del Producto, Nombre del Producto y el Folio del Maletín.")
 
     # =========================================================
     # PESTAÑA 2: ASIGNAR MALETÍN COMPLETO A SERVIDOR
